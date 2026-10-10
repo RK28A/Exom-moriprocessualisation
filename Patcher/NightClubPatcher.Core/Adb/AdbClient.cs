@@ -3,6 +3,11 @@ using NightClubPatcher.Core.Infrastructure;
 
 namespace NightClubPatcher.Core.Adb;
 
+public sealed record AdbHealth(bool Found, string? Path, string? Version, bool ServerRunning, string? Error)
+{
+    public bool Ok => Found && ServerRunning;
+}
+
 public enum DeviceState { NoAdb, NoDevice, Unauthorized, Offline, Connected, MultipleDevices }
 
 /// <summary>One line of "adb devices -l".</summary>
@@ -44,7 +49,7 @@ public sealed class AdbException : Exception
 public sealed class AdbClient
 {
     private readonly KitLog _log;
-    public string? AdbPath { get; }
+    public string? AdbPath { get; set; }
     public string? Serial { get; set; }
 
     /// <summary>Device chosen by the user (GUI selector, --device, or the pre-patch prompt).</summary>
@@ -86,6 +91,29 @@ public sealed class AdbClient
     {
         var r = Run("version");
         return r.Ok ? r.StdOut.Split('\n').FirstOrDefault()?.Trim() ?? "" : "";
+    }
+
+    /// <summary>
+    /// ADB health: binary found, runnable, version, and adb server started. Device state is
+    /// reported separately by <see cref="DetectDevice"/>.
+    /// </summary>
+    public AdbHealth CheckHealth()
+    {
+        if (AdbPath == null) return new AdbHealth(false, null, null, false, "adb not found");
+        var v = RunTimed(TimeSpan.FromSeconds(15), "version");
+        if (!v.Ok) return new AdbHealth(true, AdbPath, null, false, "adb cannot run: " + v.Combined);
+        var version = v.StdOut.Split('\n').Select(l => l.Trim())
+            .FirstOrDefault(l => l.StartsWith("Version ", StringComparison.Ordinal))?["Version ".Length..]
+            ?? v.StdOut.Split('\n').FirstOrDefault()?.Trim();
+        var server = RunTimed(TimeSpan.FromSeconds(30), "start-server");
+        return new AdbHealth(true, AdbPath, version, server.Ok, server.Ok ? null : "adb server failed to start: " + server.Combined);
+    }
+
+    /// <summary>kill-server + start-server: fixes most "offline" / stuck connections.</summary>
+    public bool RestartServer()
+    {
+        RunTimed(TimeSpan.FromSeconds(15), "kill-server");
+        return RunTimed(TimeSpan.FromSeconds(30), "start-server").Ok;
     }
 
     public List<AdbDevice> Devices() => ParseDevices(RunTimed(null, "devices", "-l").StdOut);
