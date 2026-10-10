@@ -52,14 +52,23 @@ public sealed class InstallService
         if (choice != 1) return new InstallResult(false, "Installation cancelled by user. Nothing was changed.");
 
         var data = _userData.Backup(adb);
-        if (data.Notes.Any(n => n.StartsWith("FAILED")))
-        {
-            if (ui.Choose("Data backup incomplete",
-                    "Some data could not be backed up:" + Environment.NewLine + string.Join(Environment.NewLine, data.Notes) +
-                    Environment.NewLine + Environment.NewLine + "Continue anyway?",
-                    new[] { "Cancel", "Continue" }) != 1)
-                return new InstallResult(false, "Cancelled: data backup incomplete. Nothing was uninstalled.", false, data);
-        }
+
+        // Always show exactly what was (and was not) saved before anything is uninstalled.
+        var complete = data.AccessibleDataComplete;
+        var message = (complete
+                          ? "All game data adb can reach was saved and verified file by file:"
+                          : "WARNING: the game data backup is INCOMPLETE. Uninstalling now can lose your progress.") +
+                      Environment.NewLine + Environment.NewLine + data.Describe() + Environment.NewLine + Environment.NewLine +
+                      "The full file list is in inventory.txt in the backup folder." + Environment.NewLine +
+                      (complete
+                          ? "Continue = uninstall the current game, install the new build, restore the saved files."
+                          : "Recommended: Cancel. Nothing has been uninstalled; your game and its data are untouched.");
+        var options = complete
+            ? new[] { "Cancel", "Uninstall, install and restore data" }
+            : new[] { "Cancel (keep the current game untouched)", "Continue anyway - I accept losing the missing data" };
+        if (ui.Choose(complete ? "Game data saved - confirm reinstall" : "Game data backup INCOMPLETE", message, options) != 1)
+            return new InstallResult(false,
+                "Cancelled before uninstalling. Nothing was changed on the headset. Data backup kept in " + data.Directory, false, data);
 
         _log.Step("Uninstalling the current build");
         var un = adb.Uninstall(GameConstants.PackageName);

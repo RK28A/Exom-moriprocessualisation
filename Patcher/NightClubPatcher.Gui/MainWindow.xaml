@@ -200,6 +200,8 @@
           <WrapPanel Margin="0,2,0,6">
             <Button Content="Detect / Refresh" Click="Refresh_Click" ToolTip="Re-detect ADB, headset, game and backup"/>
             <Button Content="Backup Original" Click="Backup_Click"/>
+            <Button Content="List Game Data" Click="ListData_Click" ToolTip="Show every file the game stores in Android/data and Android/obb"/>
+            <Button Content="Backup Game Data" Click="BackupData_Click" ToolTip="Save Android/data and Android/obb now (verified file by file)"/>
             <Button Content="Unpatch" Click="Unpatch_Click"/>
             <Button Content="Start Safe Mode" Click="SafeMode_Click"/>
             <Button Content="Diagnose" Click="Diagnose_Click"/>

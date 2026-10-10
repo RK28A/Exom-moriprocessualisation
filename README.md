@@ -349,12 +349,28 @@ RESTORE ORIGINAL remains the safest option.
 
 ### About user data
 
-Unity stores most saves in `persistentDataPath` = `/sdcard/Android/data/<pkg>/files`, which adb
-can back up. `/data/data/<pkg>` (e.g. `PlayerPrefs`) is **not** readable without root on store
-builds; it may be lost when Android forces an uninstall because of a signature change. Meta
-cloud backup may restore it. The patcher states this before asking for confirmation.
+Before any uninstall (only ever after your confirmation) the patcher backs up what adb can reach
+and **verifies it file by file**:
 
----
+1. **Inventory** — every file of `/sdcard/Android/data/<pkg>` and `/sdcard/Android/obb/<pkg>`
+   with its size (shown in the log and written to `inventory.txt`).
+2. **Several copy methods**, tried in order until every file is saved with the right size:
+   `adb pull` → `adb pull` through `/storage/emulated/0` → tar stream (`adb exec-out tar`) →
+   copy to `/sdcard/Download/NightClubModKit-staging` then pull (staging deleted afterwards) →
+   file-by-file pull of whatever is still missing.
+3. **Exact report** — e.g. `Android/data: 12/12 files saved (3.4 MB) - complete, verified (method:
+   tar stream)` or the list of missing files and why the folder could not be read.
+4. **Explicit decision** — if anything is missing the default is **Cancel (keep the current game
+   untouched)**; continuing requires choosing *"Continue anyway - I accept losing the missing
+   data"*.
+
+`/data/data/<pkg>` (e.g. Unity `PlayerPrefs`) cannot be read without root on store builds, so it is
+always reported as not saved. After reinstalling, the saved files are pushed back (with a tar
+upload fallback) and verified on the headset.
+
+You can inspect and save the data at any time without touching the game: **List Game Data** /
+**Backup Game Data** in the app, or `NightClubPatcher.Cli.exe --list-data` / `--backup-data`.
+Backups are kept in `Backups\com.mandegames.NightClubSimulater\userdata\<date>\`.
 
 ## Writing mods
 

@@ -513,6 +513,27 @@ public sealed class ModKitService
         return (r, i);
     }
 
+    // ------------------------------------------------------------------ game data
+
+    /// <summary>Lists every file of Android/data and Android/obb for the game (nothing is copied).</summary>
+    public string ListGameData(IUserInteraction? ui = null)
+    {
+        var connected = ui != null ? ConnectDevice(ui, out var msg) : ConnectDevice(out msg);
+        if (!connected) return msg;
+        Log.Step("Listing game data on the headset");
+        var text = UserData.DescribeOnDevice(Adb);
+        foreach (var line in text.Split('\n')) if (line.Trim().Length > 0) Log.Info(line.TrimEnd());
+        return text;
+    }
+
+    /// <summary>Backs up the game's accessible data now, without uninstalling anything.</summary>
+    public UserDataBackup? BackupGameData(IUserInteraction? ui = null)
+    {
+        var connected = ui != null ? ConnectDevice(ui, out var msg) : ConnectDevice(out msg);
+        if (!connected) { Log.Error(msg); return null; }
+        return UserData.Backup(Adb);
+    }
+
     // ------------------------------------------------------------------ recovery
 
     public RestoreResult RestoreOriginal(IUserInteraction ui, ModFilesPolicy policy = ModFilesPolicy.Ask)
@@ -613,6 +634,14 @@ public sealed class ModKitService
                     false => "not present",
                     _ => "unknown (native libs not extracted / not readable)",
                 });
+            }
+            foreach (var (label, remote) in new[] { ("Game data (Android/data)", GameConstants.DeviceExternalData), ("Game data (Android/obb)", GameConstants.DeviceObbDir) })
+            {
+                var inv = UserData.Inventory(Adb, label, remote, Path.GetTempPath());
+                r.Add(label, !inv.Exists || inv.InventoryComplete ? CheckStatus.Info : CheckStatus.Warn,
+                    !inv.Exists ? "does not exist"
+                    : $"{inv.Inventory.Count} files, {FolderBackupReport.FormatSize(inv.TotalBytes)}" +
+                      (inv.InventoryComplete ? "" : " - listing incomplete: " + string.Join("; ", inv.InventoryErrors.Take(2))));
             }
             r.Add("Mod folder", CheckStatus.Info, Adb.RemoteExists(GameConstants.DeviceModsRoot) ? GameConstants.DeviceModsRoot : "absent");
             r.Add("Safe mode flag", CheckStatus.Info, Adb.RemoteExists(GameConstants.DeviceSafeModeFlag) ? "ON" : "off");
