@@ -99,27 +99,73 @@ inside `NightClubPatcher.Core` so the GUI and CLI share one implementation.
 
 ---
 
-## Quick start on Windows (no build)
+## Quick start on Windows (no build, nothing to install)
 
-1. Download the **NightClubPatcher-Release-win-x64** artifact from the latest successful
-   *build* run in GitHub Actions (it is the `Release\` folder described below) and unzip it.
-2. Double-click **`NightClubPatcher.exe`**: the graphical patcher opens. No .NET install is
-   needed (self-contained).
-3. On first start, click **Install tools** when offered (adb, zipalign, apksigner, Java).
-4. Connect the Quest by USB (developer mode on), accept *Allow USB debugging* in the headset,
-   then press **Patch + Install**.
+Works on a clean Windows 10/11 PC: no Android Studio, Visual Studio, CMake, NDK, Java or PATH
+changes needed.
 
-## Requirements to build (Windows)
+1. Download the **NightClubPatcher-Release-win-x64** artifact from the latest successful *build*
+   run in GitHub Actions (it is the `Release\` folder) and unzip it.
+2. Double-click **`NightClubPatcher.exe`** (self-contained, no .NET install needed).
+3. The **SETUP** card checks every tool; on first start the app offers to install what is
+   missing (one confirmation): **Install / Repair Tools**.
+4. Click **Build Native Loader** (skip it if the card already shows *Native Loader: Ready*, e.g.
+   when the Release folder contains a prebuilt loader).
+5. Connect the Quest by USB (developer mode on), accept *Allow USB debugging* in the headset,
+   then press **Patch + Install** (enabled once the loader exists).
+
+## Portable tools (Install / Repair Tools)
+
+Everything is downloaded **into the NightClubModKit folder**, never system-wide, and the user's
+`PATH` is never modified (tools are prepended to the PATH of the build process only):
+
+```
+Release\
+├── Tools\
+│   ├── adb\          Android SDK platform-tools          dl.google.com, SHA-1 from Google's SDK repository manifest
+│   ├── zipalign\     } latest stable Android             dl.google.com, SHA-1 from Google's SDK repository manifest
+│   ├── apksigner\    } SDK build-tools
+│   ├── jdk\          Microsoft Build of OpenJDK 17       aka.ms, SHA-256 published by Microsoft
+│   ├── ndk\          Android NDK r27 (LTS)               dl.google.com, SHA-1 from Google's SDK repository manifest
+│   ├── cmake\        CMake 3.31.7 (Kitware)              GitHub release, SHA-256 from the release's SHA-256.txt
+│   ├── ninja\        Ninja 1.12.1                        GitHub release, pinned SHA-256 of the official asset
+│   └── tools.json    installed versions + URL + SHA-256 of every archive
+├── Native\           loader sources + build.ps1; out\arm64-v8a\libncsloader.so
+└── ...
+```
+
+* Google publishes SHA-1 (not SHA-256) for SDK/NDK packages; the app verifies that official value
+  and records the archive's SHA-256 in `tools.json`.
+* Each archive is downloaded to `Cache\downloads`, verified, extracted to `Tools\.staging` and only
+  then swapped into place: **a failed download never breaks an installed tool**. Failed tools are
+  listed and the button becomes **Retry Install / Repair**.
+* A tool that is present and runs is **never downloaded again**; a broken one is reinstalled.
+* Detection order (also used by `Native\build.ps1`):
+  * NDK: `-Ndk` argument → `Tools\ndk` → `ANDROID_NDK_HOME` → `ANDROID_NDK_ROOT` → Android SDK `ndk\<latest>`
+  * CMake: `Tools\cmake\bin\cmake.exe` → `PATH` → Android SDK `cmake\<latest>\bin`
+  * Ninja: `Tools\ninja\ninja.exe` → `PATH` → Android SDK `cmake\<latest>\bin`
+* Sizes: NDK ≈ 700 MB download / 2.5 GB on disk, JDK ≈ 190 MB, build-tools ≈ 60 MB, CMake ≈ 45 MB.
+
+CLI equivalents:
+
+```powershell
+.\NightClubPatcher.Cli.exe --check-tools                       # ADB / Build Tools / JDK 17 / NDK / CMake / Ninja / Native Loader
+.\NightClubPatcher.Cli.exe --install-tools [--accept-licenses]  # install / repair (add --no-native to skip NDK/CMake/Ninja)
+.\NightClubPatcher.Cli.exe --build-native                      # -> Native\out\arm64-v8a\libncsloader.so
+.\NightClubPatcher.Cli.exe --bundled-only ...                  # ignore Android SDK / JAVA_HOME / PATH tools
+```
+
+CI runs this exact flow on a Windows runner with every preinstalled SDK ignored
+(`NCS_BUNDLED_TOOLS_ONLY=1`): install all tools, verify a second run downloads nothing, build the
+loader, check that everything is *Ready*, then smoke-test the GUI.
+
+## Requirements to build from source (Windows)
 
 1. **Visual Studio 2022 / 2026** with the *.NET desktop development* workload, or the
    **.NET 8 SDK** alone (`dotnet --list-sdks` must show 8.0.x or newer).
-2. **adb, zipalign, apksigner, Java 17** — **installed automatically** by the app (Install tools):
-   Android platform-tools and the latest stable build-tools from Google's official SDK repository
-   (SHA-1 verified, Android SDK License), Java from the Microsoft Build of OpenJDK, all into
-   `Tools\`. CLI: `NightClubPatcher.Cli.exe --install-tools`. An existing Android SDK / JDK /
-   `PATH` install is used if present.
-3. **Android NDK r26+** only to build the native loader (`libncsloader.so`); CI builds it too.
-4. Quest in **developer mode**, USB debugging authorized.
+2. Nothing else: adb, build-tools, JDK, NDK, CMake and Ninja are installed by the app
+   (see *Portable tools*). An existing Android SDK / JDK / CMake on `PATH` is used if present.
+3. Quest in **developer mode**, USB debugging authorized.
 
 ## Build & run on Windows
 
@@ -137,7 +183,8 @@ inside `NightClubPatcher.Core` so the GUI and CLI share one implementation.
 ### Command line
 
 ```powershell
-# optional: native loader + sample mods -> Native\out\arm64-v8a\*.so  (Android NDK)
+# optional: native loader + sample mods -> Native\out\arm64-v8a\*.so
+# (uses Tools\ndk, Tools\cmake, Tools\ninja when installed, else ANDROID_NDK_HOME / PATH / Android SDK)
 .\Native\build.ps1
 
 # build everything, run tests, publish, assemble Release\
@@ -202,9 +249,12 @@ uploads the `Release\` folder as an artifact.
 * **Header** – live **ADB indicator**: green = adb running and a headset connected, amber = adb
   OK but no headset / headset unauthorized (accept *Allow USB debugging* in the headset) / several
   headsets, red = adb missing or adb server broken. Hover for adb path and version.
-  **Restart ADB** fixes most *offline* headsets; **Install tools** appears when something is missing.
+  **Restart ADB** fixes most *offline* headsets; **Install / Repair Tools** appears when something is missing.
 * **Headset is watched continuously** (`adb devices` every 3 s): plugging/unplugging a Quest or
   accepting the USB-debugging prompt updates the status by itself.
+* **SETUP card** – ADB, Build Tools, JDK 17, Android NDK, CMake, Ninja and Native Loader with their
+  versions, plus **Install / Repair Tools** and **Build Native Loader** (Patch buttons unlock once the
+  loader is built).
 * **Cards** – Headset (model, serial, Android version, compatibility), NightClub Simulator
   (installed / version / original or modded / loader), Engine (Unity, ARM64, IL2CPP, XR, build
   verification), Backup & builds, Warnings.

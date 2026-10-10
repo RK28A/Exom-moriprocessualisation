@@ -65,15 +65,22 @@ public sealed class KitPaths
     /// <summary>Candidate locations of the compiled native loader (first existing wins).</summary>
     public IEnumerable<string> LoaderCandidates()
     {
-        // Release layout: libncsloader.so next to NightClubPatcher.exe.
-        yield return Path.Combine(Root, GameConstants.LoaderLibName);
+        yield return Path.Combine(NativeOut, GameConstants.LoaderLibName);   // Native/out/arm64-v8a (Build Native Loader)
+        yield return Path.Combine(Root, GameConstants.LoaderLibName);        // next to NightClubPatcher.exe
         yield return Path.Combine(AppContext.BaseDirectory, GameConstants.LoaderLibName);
         yield return Path.Combine(Payload, GameConstants.LoaderLibName);
-        yield return Path.Combine(NativeOut, GameConstants.LoaderLibName);
         yield return Path.Combine(AppContext.BaseDirectory, "Payload", GameConstants.Abi, GameConstants.LoaderLibName);
     }
 
-    public string? FindLoader() => LoaderCandidates().FirstOrDefault(File.Exists);
+    /// <summary>
+    /// The loader the patcher injects: the most recently built of all candidates, so a fresh
+    /// "Build Native Loader" (Native/out/arm64-v8a) always wins over an older bundled copy.
+    /// </summary>
+    public string? FindLoader() => LoaderCandidates()
+        .Where(File.Exists)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderByDescending(File.GetLastWriteTimeUtc)
+        .FirstOrDefault();
 
     /// <summary>Directories scanned for native mods (libncsmod_*.so) that can be embedded into the APK.</summary>
     public IEnumerable<string> ModPayloadDirs()

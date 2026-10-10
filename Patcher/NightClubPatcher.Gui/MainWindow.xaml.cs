@@ -80,6 +80,8 @@ public partial class MainWindow : Window
     private bool _watching;
     private bool _fillingDevices;
     private bool? _lastResult;
+    private bool _loaderReady;
+    private bool _toolInstallFailed;
     private string? _deviceSignature;
     private StepEntry? _currentStep;
 
@@ -108,14 +110,17 @@ public partial class MainWindow : Window
         {
             _svc.Log.Info("NightClubModKit started. Kit folder: " + _svc.Paths.Root);
             await RefreshAsync();
+            await RefreshSetupAsync();
             if (App.SmokeTest)
             {
-                // CI: the WPF window opened and the first detection completed without errors.
+                // CI: the WPF window opened and the first detection + setup check completed without errors.
                 Application.Current.Shutdown(0);
                 return;
             }
             _watcher.Start();
+            // First start: install whatever is missing (one consent prompt), then point at the next step.
             if (_svc.ToolSetup.Missing().Count > 0) await OfferToolInstallAsync();
+            else if (!_loaderReady) _svc.Log.Info("Native loader not built yet: click \"Build Native Loader\" in the SETUP card.");
         };
     }
 
@@ -181,6 +186,10 @@ public partial class MainWindow : Window
         _busy = true;
         _lastResult = null;
         Actions.IsEnabled = false;
+        var installWasEnabled = InstallRepairButton.IsEnabled;
+        var buildWasEnabled = BuildNativeButton.IsEnabled;
+        InstallRepairButton.IsEnabled = false;
+        BuildNativeButton.IsEnabled = false;
         _steps.Clear();
         _currentStep = null;
         ActivityTitle.Text = label + "...";
@@ -223,6 +232,8 @@ public partial class MainWindow : Window
             StatusText.Text = _lastResult switch { true => "Done.", false => label + " failed - see the log below.", _ => "Ready." };
             _busy = false;
             Actions.IsEnabled = true;
+            InstallRepairButton.IsEnabled = installWasEnabled;
+            BuildNativeButton.IsEnabled = buildWasEnabled;
         }
     }
 
@@ -315,7 +326,7 @@ public partial class MainWindow : Window
         InstallToolsButton.Visibility = s.MissingTools.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         Banner.Visibility = s.MissingTools.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         BannerText.Text = s.MissingTools.Count > 0
-            ? "Missing tools: " + string.Join(", ", s.MissingTools) + ". Click \"Install tools\" (top right) to download them automatically."
+            ? "Missing tools: " + string.Join(", ", s.MissingTools) + ". Click \"Install / Repair Tools\" to download them into Tools\\ automatically (portable, your PATH is not changed)."
             : "";
     }
 
@@ -410,14 +421,92 @@ public partial class MainWindow : Window
 
     // ------------------------------------------------------------------ tools / adb
 
+    /// <summary>Re-checks every tool (runs them to read versions) and updates the SETUP card.</summary>
+    private async Task RefreshSetupAsync()
+    {
+        try
+        {
+            var (tools, loaderReady, loaderPath) = await Task.Run(() =>
+            {
+                var t = _svc.CheckTools();
+                var ready = _svc.NativeBuilder.LoaderReady(out var p);
+                return (t, ready, p);
+            });
+            var labels = new Dictionary<Core.Signing.ToolId, System.Windows.Controls.TextBlock>
+            {
+                [Core.Signing.ToolId.Adb] = SetupAdb,
+                [Core.Signing.ToolId.BuildTools] = SetupBuildTools,
+                [Core.Signing.ToolId.Jdk] = SetupJdk,
+                [Core.Signing.ToolId.Ndk] = SetupNdk,
+                [Core.Signing.ToolId.CMake] = SetupCMake,
+                [Core.Signing.ToolId.Ninja] = SetupNinja,
+            };
+            foreach (var t in tools)
+            {
+                var label = labels[t.Id];
+                label.Text = t.StatusText;
+                label.Foreground = t.Ready ? Palette.Ok : Palette.Warn;
+                label.ToolTip = t.Location;
+            }
+            _loaderReady = loaderReady;
+            SetupLoader.Text = loaderReady ? "Ready" : _svc.NativeBuilder.SourcesPresent ? "Not built" : "Not built (Native sources missing)";
+            SetupLoader.Foreground = loaderReady ? Palette.Ok : Palette.Warn;
+            SetupLoader.ToolTip = loaderPath;
+
+            var nativeToolsReady = tools.Where(t => Core.Signing.ToolSetup.NativeTools.Contains(t.Id)).All(t => t.Ready);
+            BuildNativeButton.IsEnabled = nativeToolsReady && _svc.NativeBuilder.SourcesPresent;
+            BuildNativeButton.ToolTip = BuildNativeButton.IsEnabled
+                ? "Build libncsloader.so with the bundled NDK, CMake and Ninja"
+                : "Install the Android NDK, CMake and Ninja first (Install / Repair Tools)";
+            var allReady = tools.All(t => t.Ready);
+            InstallRepairButton.Content = _toolInstallFailed && !allReady ? "Retry Install / Repair" : "Install / Repair Tools";
+
+            // Patching needs the loader.
+            PatchButton.IsEnabled = loaderReady;
+            PatchInstallButton.IsEnabled = loaderReady;
+            PatchInstallButton.ToolTip = loaderReady ? "Choose headset, patch, sign, install" : "Build the native loader first (SETUP card)";
+            PatchButton.ToolTip = loaderReady ? "Build the patched APK only" : "Build the native loader first (SETUP card)";
+        }
+        catch (Exception ex)
+        {
+            _svc.Log.Warn("Setup check failed: " + ex.Message);
+        }
+    }
+
     private async Task OfferToolInstallAsync()
     {
-        await RunAsync("Installing tools", async () =>
+        await RunAsync("Install / Repair Tools", async () =>
         {
-            var ok = await _svc.EnsureToolsAsync(_ui);
-            _lastResult = ok;
-            if (ok) _svc.Log.Success("All required tools are installed.");
+            var r = await _svc.InstallToolsAsync(_ui, includeNative: true);
+            _toolInstallFailed = !r.Ok;
+            _lastResult = r.Ok;
+            if (r.Ok)
+            {
+                _svc.Log.Success("All tools are ready.");
+            }
+            else if (r.Errors.Count > 0 && r.Errors[0] != "Cancelled by the user.")
+            {
+                ErrorDialog.Show(this, "Some tools could not be installed",
+                    "Already installed tools were kept. Check your internet connection and click \"Retry Install / Repair\".",
+                    string.Join(Environment.NewLine, r.Errors), _svc.Paths.Logs);
+            }
         });
+        await RefreshSetupAsync();
+        await RefreshAsync();
+        if (!_loaderReady && BuildNativeButton.IsEnabled)
+            _svc.Log.Info("Next step: click \"Build Native Loader\" in the SETUP card.");
+    }
+
+    private async void BuildNative_Click(object sender, RoutedEventArgs e)
+    {
+        await RunAsync("Build Native Loader", async () =>
+        {
+            var r = await Task.Run(() => _svc.BuildNativeLoader());
+            Report("BUILD NATIVE LOADER", r.Ok, r.Ok
+                ? r.Message + Environment.NewLine + Environment.NewLine + "Patch + Install is now available."
+                : r.Message);
+        });
+        await RefreshSetupAsync();
         await RefreshAsync();
     }
 
