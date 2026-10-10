@@ -22,7 +22,7 @@
           </StackPanel>
         </Border>
         <Button Style="{StaticResource Small}" Content="Restart ADB" Click="RestartAdb_Click" ToolTip="adb kill-server + start-server"/>
-        <Button x:Name="InstallToolsButton" Style="{StaticResource Small}" Content="Install tools" Click="InstallTools_Click"
+        <Button x:Name="InstallToolsButton" Style="{StaticResource Small}" Content="Install / Repair Tools" Click="InstallTools_Click"
                 Visibility="Collapsed" BorderBrush="{StaticResource Warn}"
                 ToolTip="Download adb, zipalign, apksigner and Java into Tools/"/>
       </StackPanel>
@@ -57,6 +57,35 @@
       <!-- Status cards -->
       <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
         <StackPanel>
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource CardTitle}" Text="SETUP"/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Style="{StaticResource Label}" Text="ADB"/>
+                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Value}" x:Name="SetupAdb" Text="..." FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="1" Style="{StaticResource Label}" Text="Build Tools"/>
+                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" x:Name="SetupBuildTools" Text="..." FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="2" Style="{StaticResource Label}" Text="JDK 17"/>
+                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" x:Name="SetupJdk" Text="..." FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="3" Style="{StaticResource Label}" Text="Android NDK"/>
+                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" x:Name="SetupNdk" Text="..." FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="4" Style="{StaticResource Label}" Text="CMake"/>
+                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" x:Name="SetupCMake" Text="..." FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="5" Style="{StaticResource Label}" Text="Ninja"/>
+                <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" x:Name="SetupNinja" Text="..." FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="6" Style="{StaticResource Label}" Text="Native Loader"/>
+                <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" x:Name="SetupLoader" Text="..." FontWeight="SemiBold"/>
+              </Grid>
+              <UniformGrid Columns="2" Margin="0,10,0,0">
+                <Button x:Name="InstallRepairButton" Content="Install / Repair Tools" Click="InstallTools_Click" Margin="0,0,6,0"
+                        ToolTip="Download every missing tool into Tools\ (portable, PATH untouched)"/>
+                <Button x:Name="BuildNativeButton" Content="Build Native Loader" Click="BuildNative_Click" Margin="0"
+                        ToolTip="Build libncsloader.so with the bundled NDK, CMake and Ninja"/>
+              </UniformGrid>
+            </StackPanel>
+          </Border>
           <Border Style="{StaticResource Card}">
             <StackPanel>
               <DockPanel>
@@ -149,13 +178,13 @@
 
         <StackPanel x:Name="Actions" Grid.Row="0">
           <UniformGrid Columns="3">
-            <Button Style="{StaticResource Primary}" Click="PatchInstall_Click" ToolTip="Choose headset, patch, sign, install">
+            <Button x:Name="PatchInstallButton" Style="{StaticResource Primary}" Click="PatchInstall_Click" ToolTip="Choose headset, patch, sign, install">
               <StackPanel>
                 <TextBlock Text="Patch + Install" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                 <TextBlock Text="recommended" FontSize="11" Opacity="0.8" HorizontalAlignment="Center"/>
               </StackPanel>
             </Button>
-            <Button Style="{StaticResource Primary}" Click="Patch_Click" Background="#3A2560" ToolTip="Build the patched APK only">
+            <Button x:Name="PatchButton" Style="{StaticResource Primary}" Click="Patch_Click" Background="#3A2560" ToolTip="Build the patched APK only">
               <StackPanel>
                 <TextBlock Text="Patch Game" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                 <TextBlock Text="build APK only" FontSize="11" Opacity="0.8" HorizontalAlignment="Center"/>

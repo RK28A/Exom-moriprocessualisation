@@ -38,7 +38,11 @@ internal static class Program
           --elf-needed <so>            List DT_NEEDED of a shared library
           --elf-add-needed <in.so> <lib> <out.so>   Developer: add a DT_NEEDED entry
           --tools                      Show located external tools
-          --install-tools              Download missing adb / zipalign / apksigner / Java into Tools/
+          --check-tools                Setup status: ADB, Build Tools, JDK 17, Android NDK, CMake, Ninja, Native Loader
+          --install-tools              Install / repair every missing tool into Tools/ (portable, PATH untouched)
+                                       add --accept-licenses to skip the prompt, --no-native to skip NDK/CMake/Ninja
+          --build-native               Build libncsloader.so with the bundled NDK/CMake/Ninja -> Native/out/arm64-v8a
+          --bundled-only               Ignore Android SDK / JAVA_HOME / PATH tools (only use Tools/)
           --check-adb                  Check adb (binary, version, server) and list devices
           --restart-adb                Restart the adb server (fixes most "offline" devices)
 
@@ -81,6 +85,8 @@ internal static class Program
             Console.ResetColor();
         };
         IUserInteraction ui = args.Contains("--non-interactive") ? new NonInteractive(svc.Log) : new ConsoleInteraction();
+
+        if (args.Contains("--bundled-only")) { svc.Tools.BundledOnly = true; svc.ReloadTools(); }
 
         var serial = Value(args, "--device");
         if (args.Contains("--device"))
@@ -131,10 +137,20 @@ internal static class Program
 
             case "--install-tools":
             {
-                var missing = svc.ToolSetup.Missing();
-                if (missing.Count == 0) { svc.Log.Success("All tools are already installed."); return 0; }
-                var ok = svc.EnsureToolsAsync(ui).GetAwaiter().GetResult();
-                return ok ? 0 : 2;
+                var r = svc.InstallToolsAsync(ui, includeNative: !args.Contains("--no-native"),
+                    acceptLicenses: args.Contains("--accept-licenses")).GetAwaiter().GetResult();
+                PrintToolStatus(svc);
+                return r.Ok ? 0 : 2;
+            }
+
+            case "--check-tools":
+                return PrintToolStatus(svc) ? 0 : 2;
+
+            case "--build-native":
+            {
+                var r = svc.BuildNativeLoader();
+                Report(svc, r.Ok, r.Message);
+                return r.Ok ? 0 : 2;
             }
 
             case "--check-adb":
@@ -287,6 +303,29 @@ internal static class Program
                 Console.WriteLine(Help);
                 return 1;
         }
+    }
+
+    /// <summary>Setup status table; returns true when everything (including the loader) is ready.</summary>
+    private static bool PrintToolStatus(ModKitService svc)
+    {
+        Console.WriteLine();
+        var all = true;
+        foreach (var t in svc.CheckTools())
+        {
+            all &= t.Ready;
+            Console.ForegroundColor = t.Ready ? ConsoleColor.Green : ConsoleColor.Yellow;
+            Console.WriteLine($"{t.Name,-15} {t.StatusText}");
+            Console.ResetColor();
+            if (t.Location != null) Console.WriteLine($"{"",-15} {t.Location}");
+        }
+        var loader = svc.NativeBuilder.LoaderReady(out var path);
+        all &= loader;
+        Console.ForegroundColor = loader ? ConsoleColor.Green : ConsoleColor.Yellow;
+        Console.WriteLine($"{"Native Loader",-15} {(loader ? "Ready" : "Not built (run --build-native)")}");
+        Console.ResetColor();
+        if (path != null) Console.WriteLine($"{"",-15} {path}");
+        Console.WriteLine($"{"tools.json",-15} {svc.ToolSetup.ManifestPath}");
+        return all;
     }
 
     private static int ListDevices(ModKitService svc)

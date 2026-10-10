@@ -67,6 +67,7 @@ public sealed class ModKitService
     public RestoreService Restorer { get; }
     public LogcatService Logcat { get; }
     public ToolSetup ToolSetup { get; }
+    public NativeBuilder NativeBuilder { get; }
 
     private readonly Dictionary<string, (DateTime mtime, long size, ApkAnalysis analysis)> _analysisCache = new();
 
@@ -88,6 +89,7 @@ public sealed class ModKitService
         Restorer = new RestoreService(Log, Backups, Installer);
         Logcat = new LogcatService(Log);
         ToolSetup = new ToolSetup(Paths, Tools, Log);
+        NativeBuilder = new NativeBuilder(Paths, Tools, Log);
     }
 
     private string? ModKitJavaHash => Keys.TryLoad()?.CertJavaHash;
@@ -118,16 +120,41 @@ public sealed class ModKitService
         Log.Info("adb: " + (Adb.AdbPath ?? "not found"));
     }
 
-    /// <summary>Downloads missing tools after asking the user. Returns true when nothing is missing afterwards.</summary>
+    /// <summary>Full tool status (runs each tool to read its version) for the setup panel.</summary>
+    public IReadOnlyList<ToolState> CheckTools() => ToolSetup.CheckAll();
+
+    /// <summary>
+    /// Install / Repair Tools: downloads every missing or broken tool into Tools/ after one consent
+    /// prompt (unless <paramref name="acceptLicenses"/>). Working tools are kept and never re-downloaded.
+    /// </summary>
+    public async Task<ToolSetupResult> InstallToolsAsync(IUserInteraction ui, bool includeNative = true, bool acceptLicenses = false,
+        CancellationToken ct = default)
+    {
+        Log.Step("Checking tools");
+        var states = ToolSetup.CheckAll(includeNative ? ToolSetup.AllTools : ToolSetup.AllTools.Except(ToolSetup.NativeTools));
+        foreach (var st in states) Log.Info($"{st.Name}: {st.StatusText}");
+        var todo = states.Where(st => !st.Ready).Select(st => st.Id).ToList();
+        if (todo.Count == 0)
+        {
+            Log.Success("All tools are ready.");
+            return new ToolSetupResult(true, Array.Empty<string>(), Array.Empty<string>());
+        }
+        if (!acceptLicenses && !ui.Confirm("Install / Repair Tools", ToolSetup.ConsentText(todo), "Download and install"))
+            return new ToolSetupResult(false, Array.Empty<string>(), new[] { "Cancelled by the user." });
+        var r = await ToolSetup.InstallAsync(todo, ct);
+        ReloadTools();
+        return r;
+    }
+
+    /// <summary>Backwards-compatible helper: true when nothing is missing afterwards.</summary>
     public async Task<bool> EnsureToolsAsync(IUserInteraction ui, CancellationToken ct = default)
     {
-        if (ToolSetup.Missing().Count == 0) return true;
-        if (!ui.Confirm("Install required tools", ToolSetup.ConsentText(), "Download and install")) return false;
-        var r = await ToolSetup.InstallMissingAsync(ct);
-        ReloadTools();
-        if (!r.Ok) ui.Notify("Tool installation", "Some tools could not be installed:" + Environment.NewLine + string.Join(Environment.NewLine, r.Errors));
+        await InstallToolsAsync(ui, includeNative: true, acceptLicenses: false, ct);
         return ToolSetup.Missing().Count == 0;
     }
+
+    /// <summary>BUILD NATIVE LOADER with the bundled NDK / CMake / Ninja.</summary>
+    public NativeBuildResult BuildNativeLoader(CancellationToken ct = default) => NativeBuilder.Build(ct);
 
     // ------------------------------------------------------------------ detection
 

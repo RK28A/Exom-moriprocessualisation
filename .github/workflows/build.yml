@@ -73,3 +73,56 @@ jobs:
             !Release/Builds
             !Release/Keys
             !Release/Cache
+
+  windows-clean-setup:
+    name: Windows clean-machine setup (download NDK/CMake/Ninja/JDK/adb, build loader)
+    runs-on: windows-latest
+    env:
+      # Ignore the runner's preinstalled Android SDK / JDK / CMake: behave like a clean Windows PC.
+      NCS_BUNDLED_TOOLS_ONLY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build Release without a prebuilt loader
+        shell: pwsh
+        run: ./Build-Windows.ps1 -SkipTests
+      - name: Install / Repair Tools (all six tools into Release\Tools)
+        shell: pwsh
+        run: |
+          .\Release\NightClubPatcher.Cli.exe --install-tools --accept-licenses
+          if ($LASTEXITCODE) { throw "install-tools failed" }
+          Get-Content .\Release\Tools\tools.json
+      - name: Second run must not download anything
+        shell: pwsh
+        run: |
+          $out = .\Release\NightClubPatcher.Cli.exe --install-tools --accept-licenses 2>&1 | Out-String
+          Write-Host $out
+          if ($out -match "Downloading") { throw "tools were downloaded again" }
+      - name: Build Native Loader with the bundled NDK / CMake / Ninja
+        shell: pwsh
+        run: |
+          .\Release\NightClubPatcher.Cli.exe --build-native
+          if ($LASTEXITCODE) { throw "build-native failed" }
+          if (-not (Test-Path .\Release\Native\out\arm64-v8a\libncsloader.so)) { throw "libncsloader.so missing" }
+      - name: Setup status must be all Ready
+        shell: pwsh
+        run: |
+          .\Release\NightClubPatcher.Cli.exe --check-tools
+          if ($LASTEXITCODE) { throw "some tools are not ready" }
+      - name: GUI smoke test from the fully set-up Release folder
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath .\Release\NightClubPatcher.exe -ArgumentList "--smoke-test" -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "GUI smoke test timed out" }
+          if ($p.ExitCode -ne 0) { throw "GUI smoke test failed ($($p.ExitCode))" }
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-setup-logs
+          path: |
+            Release/Logs
+            Release/Tools/tools.json
+          if-no-files-found: ignore

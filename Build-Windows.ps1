@@ -6,10 +6,10 @@
   Release\
   ├── NightClubPatcher.exe        WPF GUI  (main application, self-contained single file)
   ├── NightClubPatcher.Cli.exe    command line (advanced, self-contained single file)
-  ├── libncsloader.so             native loader (if Native\out\arm64-v8a was built)
-  ├── libncsmod_*.so              sample mods (if built; embedded into the APK by the patcher)
+  ├── Native\                     loader sources + build.ps1; out\arm64-v8a\libncsloader.so (prebuilt or built in-app)
+  ├── SDK\  Mods\                 headers and sample mods used by the native build
   ├── Versions\                   game version profiles
-  ├── Tools\                      adb / zipalign / apksigner / jdk (auto-installed by the app if missing)
+  ├── Tools\                      adb, build-tools, jdk, ndk, cmake, ninja + tools.json (installed by the app)
   ├── Logs\
   └── NightClubModKit.root        marks this folder as the kit root
 
@@ -114,14 +114,33 @@ Get-ChildItem (Join-Path $Root "Tools") -Recurse -File | ForEach-Object {
     }
 }
 
-# Native payload.
+# Native sources, so "Build Native Loader" works from the Release folder (SDK\ and Mods\ are
+# referenced by Native\CMakeLists.txt). Build outputs and caches are not copied.
+foreach ($dir in "Native", "SDK", "Mods") {
+    $src = Join-Path $Root $dir
+    $dst = Join-Path $Output $dir
+    Get-ChildItem $src -Recurse -File | Where-Object {
+        $rel = $_.FullName.Substring($src.Length).TrimStart('\', '/')
+        -not ($rel -match '^(build[^\\/]*|out)[\\/]')
+    } | ForEach-Object {
+        $rel = $_.FullName.Substring($src.Length).TrimStart('\', '/')
+        $target = Join-Path $dst $rel
+        New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+        Copy-Item $_.FullName $target -Force
+    }
+}
+Write-Host "  copied Native\, SDK\ and Mods\ sources (for Build Native Loader)"
+
+# Prebuilt native payload (when available) goes exactly where the patcher looks for it.
 $nativeOut = Join-Path $Root "Native\out\arm64-v8a"
 $loader = Join-Path $nativeOut "libncsloader.so"
+$releaseNativeOut = Join-Path $Output "Native\out\arm64-v8a"
 if (Test-Path $loader) {
-    Copy-Item (Join-Path $nativeOut "*.so") $Output -Force
-    Write-Host "  copied libncsloader.so and mods from Native\out\arm64-v8a"
+    New-Item -ItemType Directory -Force -Path $releaseNativeOut | Out-Null
+    Copy-Item (Join-Path $nativeOut "*.so") $releaseNativeOut -Force
+    Write-Host "  copied prebuilt libncsloader.so + mods to Native\out\arm64-v8a"
 } else {
-    Write-Warning "libncsloader.so is not built (Native\out\arm64-v8a). The GUI runs, but patching needs it: run .\Native\build.ps1 (Android NDK) or use -BuildNative, or copy libncsloader.so next to NightClubPatcher.exe."
+    Write-Host "  no prebuilt loader: build it from the app (Install / Repair Tools, then Build Native Loader)"
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Output "Logs") | Out-Null
