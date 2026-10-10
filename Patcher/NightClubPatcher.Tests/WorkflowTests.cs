@@ -171,13 +171,15 @@ public class WorkflowTests
         Assert.NotEqual(original.Hash(GameConstants.LibMainEntry), patched.Hash(GameConstants.LibMainEntry));
 
         // Native libraries are stored and page aligned (required with extractNativeLibs=false).
-        using var outZip = new ZipArchiveReader(Path.Combine(ws.Patched, "unsigned.apk"));
-        foreach (var e in outZip.Entries.Where(e => e.Name.EndsWith(".so")))
+        using (var outZip = new ZipArchiveReader(Path.Combine(ws.Patched, "unsigned.apk")))
         {
-            Assert.True(e.IsStored, e.Name);
-            Assert.Equal(0, e.DataOffset % 4096);
+            foreach (var e in outZip.Entries.Where(e => e.Name.EndsWith(".so")))
+            {
+                Assert.True(e.IsStored, e.Name);
+                Assert.Equal(0, e.DataOffset % 4096);
+            }
         }
-        Directory.Delete(ws.Root, true);
+        Directory.Delete(ws.Root, true); // the reader is closed first: Windows refuses to delete open files
     }
 
     [Fact]
