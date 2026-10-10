@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds libncsloader.so and the sample mods for the Quest (arm64-v8a).
+  Builds libncmkloader.so and the sample mods for the Quest (arm64-v8a).
   Output: Native\out\arm64-v8a\  (exactly where the patcher looks for the loader)
 
 .DESCRIPTION
@@ -127,7 +127,7 @@ if ($LASTEXITCODE) { throw "cmake build failed (exit code $LASTEXITCODE)" }
 
 $ErrorActionPreference = "Stop"
 $out = Join-Path $here "out\arm64-v8a"
-$loader = Join-Path $out "libncsloader.so"
+$loader = Join-Path $out "libncmkloader.so"
 if (-not (Test-Path $loader)) { throw "Build finished but $loader is missing." }
 
 Write-Host ""

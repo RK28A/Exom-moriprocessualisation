@@ -1,17 +1,18 @@
 <#
 .SYNOPSIS
-  Builds NightClubModKit and assembles a ready-to-use Release\ folder for Windows.
+  Builds NCMK and assembles a ready-to-use Release\ folder for Windows.
 
 .DESCRIPTION
   Release\
   ├── NightClubPatcher.exe        WPF GUI  (main application, self-contained single file)
   ├── NightClubPatcher.Cli.exe    command line (advanced, self-contained single file)
-  ├── Native\                     loader sources + build.ps1; out\arm64-v8a\libncsloader.so (prebuilt or built in-app)
+  ├── Native\                     loader sources + build.ps1; out\arm64-v8a\libncmkloader.so (prebuilt or built in-app)
   ├── SDK\  Mods\                 headers and sample mods used by the native build
   ├── Versions\                   game version profiles
+  ├── DeviceMods\                 Mods\ + Config\ pushed to the headset's NCMKMods folder
   ├── Tools\                      adb, build-tools, jdk, ndk, cmake, ninja + tools.json (installed by the app)
   ├── Logs\
-  └── NightClubModKit.root        marks this folder as the kit root
+  └── NCMK.root        marks this folder as the kit root
 
   The Release folder is NEVER wiped: if you already used the patcher from it, it contains
   Backups\ (your original APK) and Keys\ (your permanent signing key). Only the executables are
@@ -20,7 +21,7 @@
 .EXAMPLE
   .\Build-Windows.ps1
   .\Build-Windows.ps1 -BuildNative -SmokeTest
-  .\Build-Windows.ps1 -Output D:\NightClubModKit
+  .\Build-Windows.ps1 -Output D:\NCMK
 #>
 [CmdletBinding()]
 param(
@@ -64,7 +65,7 @@ if ($BuildNative) {
 }
 
 Step "Building the solution (Core, CLI, GUI, Tests)"
-Invoke-Checked "dotnet build" { dotnet build (Join-Path $Root "NightClubModKit.sln") -c $Configuration }
+Invoke-Checked "dotnet build" { dotnet build (Join-Path $Root "NCMK.sln") -c $Configuration }
 
 if (-not $SkipTests) {
     Step "Running unit tests"
@@ -114,6 +115,17 @@ Get-ChildItem (Join-Path $Root "Tools") -Recurse -File | ForEach-Object {
     }
 }
 
+# DeviceMods\ (mods + config pushed to the headset): add missing files, never overwrite the user's.
+$devOut = Join-Path $Output "DeviceMods"
+Get-ChildItem (Join-Path $Root "DeviceMods") -Recurse -File -Force | ForEach-Object {
+    $rel = $_.FullName.Substring((Join-Path $Root "DeviceMods").Length).TrimStart('\', '/')
+    $dest = Join-Path $devOut $rel
+    if (-not (Test-Path $dest)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent) | Out-Null
+        Copy-Item $_.FullName $dest
+    }
+}
+
 # Native sources, so "Build Native Loader" works from the Release folder (SDK\ and Mods\ are
 # referenced by Native\CMakeLists.txt). Build outputs and caches are not copied.
 foreach ($dir in "Native", "SDK", "Mods") {
@@ -133,18 +145,18 @@ Write-Host "  copied Native\, SDK\ and Mods\ sources (for Build Native Loader)"
 
 # Prebuilt native payload (when available) goes exactly where the patcher looks for it.
 $nativeOut = Join-Path $Root "Native\out\arm64-v8a"
-$loader = Join-Path $nativeOut "libncsloader.so"
+$loader = Join-Path $nativeOut "libncmkloader.so"
 $releaseNativeOut = Join-Path $Output "Native\out\arm64-v8a"
 if (Test-Path $loader) {
     New-Item -ItemType Directory -Force -Path $releaseNativeOut | Out-Null
     Copy-Item (Join-Path $nativeOut "*.so") $releaseNativeOut -Force
-    Write-Host "  copied prebuilt libncsloader.so + mods to Native\out\arm64-v8a"
+    Write-Host "  copied prebuilt libncmkloader.so + mods to Native\out\arm64-v8a"
 } else {
     Write-Host "  no prebuilt loader: build it from the app (Install / Repair Tools, then Build Native Loader)"
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Output "Logs") | Out-Null
-Set-Content -Path (Join-Path $Output "NightClubModKit.root") -Value "NightClubModKit kit root - keep this file next to NightClubPatcher.exe."
+Set-Content -Path (Join-Path $Output "NCMK.root") -Value "NCMK kit root - keep this file next to NightClubPatcher.exe."
 Copy-Item (Join-Path $Root "README.md") (Join-Path $Output "README.md") -Force
 
 Step "Verifying"

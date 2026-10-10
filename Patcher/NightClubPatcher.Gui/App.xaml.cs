@@ -50,8 +50,8 @@ public partial class App : Application
         var path = WriteCrashLog(ex);
         try
         {
-            MessageBox.Show($"NightClub Mod Patcher has to close:\n\n{ex.Message}\n\nDetails were saved to:\n{path}",
-                "NightClub Mod Patcher", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"NCMK has to close:\n\n{ex.Message}\n\nDetails were saved to:\n{path}",
+                "NCMK", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         catch
         {

@@ -125,7 +125,7 @@ public sealed class BackupManager
             if (backup.Metadata.VersionCode != analysis.Manifest.VersionCode) problems.Add("versionCode differs from backup.json.");
             if (backup.Metadata.VersionName != analysis.Manifest.VersionName) problems.Add("versionName differs from backup.json.");
         }
-        if (analysis.IsPatchedByModKit) problems.Add("Backup contains NightClubModKit modifications!");
+        if (analysis.IsPatchedByModKit) problems.Add("Backup contains NCMK modifications!");
 
         foreach (var split in backup.Metadata?.Splits ?? new())
         {

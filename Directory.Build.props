@@ -3,9 +3,9 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.3.0</Version>
-    <Company>NightClubModKit</Company>
-    <Product>NightClubModKit</Product>
+    <Version>0.4.0</Version>
+    <Company>NCMK</Company>
+    <Product>NCMK</Product>
     <!-- Allows building the WPF project on non-Windows CI hosts (it only runs on Windows). -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>

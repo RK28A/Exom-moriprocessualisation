@@ -1,4 +1,4 @@
-// NightClubModKit native loader (libncsloader.so).
+// NCMK native loader (libncmkloader.so).
 //
 // Injected as a DT_NEEDED dependency of Unity's libmain.so, so the dynamic linker runs our
 // constructor right before libmain.so is initialised - before libunity.so / libil2cpp.so exist.
@@ -13,8 +13,11 @@
 //   STAGE 06 Runtime initialized
 //   STAGE 07 Plugin manager initialized
 //   STAGE 08 Mods loaded
+//   STAGE 09 Main-thread dispatcher (which per-frame target was hooked, or that none worked)
 //
-// No hooks are installed and no game code is modified.
+// No game code is modified. The only runtime change is the main-thread dispatcher, which swaps
+// two MethodInfo function-pointer slots of one per-frame managed method (see Hooks/main_thread.cpp)
+// and restores them on unload. It is never installed in Safe Mode.
 
 #include <dlfcn.h>
 #include <link.h>
@@ -23,14 +26,16 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include "../../SDK/Core/ncs_mod_api.h"
+#include "../../SDK/Core/ncmk_mod_api.h"
+#include "../Hooks/main_thread.h"
 #include "../Il2Cpp/il2cpp_api.h"
-#include "../Logging/ncs_log.h"
+#include "../Logging/ncmk_log.h"
 #include "../Plugins/plugin_manager.h"
 #include "../Unity/unity_runtime.h"
 #include "environment.h"
@@ -38,7 +43,7 @@
 namespace {
 
 using namespace std::chrono_literals;
-namespace IL = NCS::IL2CPP;
+namespace IL = NCMK::IL2CPP;
 
 struct LoaderState {
     std::string package;
@@ -46,10 +51,10 @@ struct LoaderState {
     std::string selfPath;
     std::string gameVersion = "unknown";
     std::string unityVersion = "unknown";
-    ncs::DeviceInfo device;
+    ncmk::DeviceInfo device;
     bool safeMode = false;
-    ncs::LoaderConfig config;
-    ncs::PluginManager plugins;
+    ncmk::LoaderConfig config;
+    ncmk::PluginManager plugins;
     std::vector<std::string> assemblyNames;
     std::vector<std::string> modNames;
 };
@@ -60,10 +65,12 @@ LoaderState& G() {
     static LoaderState* state = new LoaderState();  // thread-safe, never destroyed
     return *state;
 }
-NCSHostApi g_host{};  // POD: zero-initialized at load time, no dynamic initializer
+NCMKHostApi g_host{};  // POD: zero-initialized at load time, no dynamic initializer
 std::atomic<bool> g_started{false};
+std::atomic<bool> g_stopping{false};
+std::atomic<bool> g_loopRunning{false};
 
-void Stage(int n, const char* what) { NCS_LOGI("[NCS] STAGE %02d %s", n, what); }
+void Stage(int n, const char* what) { NCMK_LOGI("[NCMK] STAGE %02d %s", n, what); }
 
 // ---------------------------------------------------------------------------- lib detection
 
@@ -100,11 +107,11 @@ bool WaitFor(Pred pred, std::chrono::milliseconds timeout, std::chrono::millisec
     while (!pred()) {
         auto now = std::chrono::steady_clock::now();
         if (now - start > timeout) {
-            NCS_LOGE("[NCS] Timed out waiting for %s", what);
+            NCMK_LOGE("[NCMK] Timed out waiting for %s", what);
             return false;
         }
         if (now > nextReport) {
-            NCS_LOGI("[NCS] Still waiting for %s...", what);
+            NCMK_LOGI("[NCMK] Still waiting for %s...", what);
             nextReport = now + 10s;
         }
         std::this_thread::sleep_for(step);
@@ -115,7 +122,7 @@ bool WaitFor(Pred pred, std::chrono::milliseconds timeout, std::chrono::millisec
 // ---------------------------------------------------------------------------- host API
 
 void HostLog(int level, const char* modId, const char* message) {
-    ncs::log::Write(static_cast<ncs::log::Level>(level < 0 ? 0 : level > 3 ? 3 : level), "[%s] %s", modId ? modId : "mod",
+    ncmk::log::Write(static_cast<ncmk::log::Level>(level < 0 ? 0 : level > 3 ? 3 : level), "[%s] %s", modId ? modId : "mod",
                     message ? message : "");
 }
 int HostIl2CppReady() { return IL::IsReady() ? 1 : 0; }
@@ -126,20 +133,20 @@ int HostAssemblyCount() { return static_cast<int>(G().assemblyNames.size()); }
 const char* HostAssemblyName(int i) {
     return i >= 0 && i < static_cast<int>(G().assemblyNames.size()) ? G().assemblyNames[i].c_str() : "";
 }
-NCSImage* HostFindImage(const char* n) { return const_cast<Il2CppImage*>(IL::FindAssembly(n)); }
-NCSClass* HostFindClass(const char* a, const char* ns, const char* n) { return IL::FindClass(a, ns, n); }
-NCSMethod* HostFindMethod(NCSClass* k, const char* n, int argc) {
+NCMKImage* HostFindImage(const char* n) { return const_cast<Il2CppImage*>(IL::FindAssembly(n)); }
+NCMKClass* HostFindClass(const char* a, const char* ns, const char* n) { return IL::FindClass(a, ns, n); }
+NCMKMethod* HostFindMethod(NCMKClass* k, const char* n, int argc) {
     return const_cast<MethodInfo*>(IL::FindMethod(static_cast<Il2CppClass*>(k), n, argc));
 }
-NCSField* HostFindField(NCSClass* k, const char* n) { return IL::FindField(static_cast<Il2CppClass*>(k), n); }
-NCSObject* HostInvoke(NCSMethod* m, void* inst, void** args, NCSObject** exc) {
+NCMKField* HostFindField(NCMKClass* k, const char* n) { return IL::FindField(static_cast<Il2CppClass*>(k), n); }
+NCMKObject* HostInvoke(NCMKMethod* m, void* inst, void** args, NCMKObject** exc) {
     Il2CppObject* e = nullptr;
     Il2CppObject* r = IL::Invoke(static_cast<const MethodInfo*>(m), inst, args, &e);
     if (exc) *exc = e;
     return r;
 }
-NCSString* HostNewString(const char* s) { return IL::NewString(s); }
-int HostStringToUtf8(NCSString* s, char* buf, int size) {
+NCMKString* HostNewString(const char* s) { return IL::NewString(s); }
+int HostStringToUtf8(NCMKString* s, char* buf, int size) {
     if (!buf || size <= 0) return -1;
     std::string u = IL::ToUtf8(static_cast<Il2CppString*>(s));
     int n = static_cast<int>(u.size() < static_cast<size_t>(size - 1) ? u.size() : static_cast<size_t>(size - 1));
@@ -147,17 +154,32 @@ int HostStringToUtf8(NCSString* s, char* buf, int size) {
     buf[n] = '\0';
     return n;
 }
-void HostGetField(NCSObject* o, NCSField* f, void* out) { IL::GetField(static_cast<Il2CppObject*>(o), static_cast<FieldInfo*>(f), out); }
-void HostSetField(NCSObject* o, NCSField* f, void* v) { IL::SetField(static_cast<Il2CppObject*>(o), static_cast<FieldInfo*>(f), v); }
-void HostGetStatic(NCSField* f, void* out) { IL::GetStaticField(static_cast<FieldInfo*>(f), out); }
-void HostSetStatic(NCSField* f, void* v) { IL::SetStaticField(static_cast<FieldInfo*>(f), v); }
-void* HostUnbox(NCSObject* o) { return o && IL::api.il2cpp_object_unbox ? IL::api.il2cpp_object_unbox(static_cast<Il2CppObject*>(o)) : nullptr; }
+void HostGetField(NCMKObject* o, NCMKField* f, void* out) { IL::GetField(static_cast<Il2CppObject*>(o), static_cast<FieldInfo*>(f), out); }
+void HostSetField(NCMKObject* o, NCMKField* f, void* v) { IL::SetField(static_cast<Il2CppObject*>(o), static_cast<FieldInfo*>(f), v); }
+void HostGetStatic(NCMKField* f, void* out) { IL::GetStaticField(static_cast<FieldInfo*>(f), out); }
+void HostSetStatic(NCMKField* f, void* v) { IL::SetStaticField(static_cast<FieldInfo*>(f), v); }
+void* HostUnbox(NCMKObject* o) { return o && IL::api.il2cpp_object_unbox ? IL::api.il2cpp_object_unbox(static_cast<Il2CppObject*>(o)) : nullptr; }
 int HostAttach() { return IL::AttachCurrentThread() ? 1 : 0; }
 
+// API 2
+int HostIsMainThread() { return ncmk::hooks::IsMainThread() ? 1 : 0; }
+int HostRunOnMainThread(NCMKMainThreadFn fn, void* user) { return ncmk::hooks::Post(fn, user) ? 1 : 0; }
+NCMKMethod* HostFindMethodBySignature(NCMKClass* k, const char* n, const char* const* suffixes, int count) {
+    return const_cast<MethodInfo*>(IL::FindMethodBySignature(static_cast<Il2CppClass*>(k), n, suffixes, count));
+}
+NCMKClass* HostFindNestedClass(NCMKClass* outer, const char* n) { return IL::FindNestedClass(static_cast<Il2CppClass*>(outer), n); }
+NCMKObject* HostTypeOf(NCMKClass* k) { return IL::TypeOf(static_cast<Il2CppClass*>(k)); }
+NCMKObject* HostNewObject(NCMKClass* k) { return IL::NewObject(static_cast<Il2CppClass*>(k)); }
+uint32_t HostPin(NCMKObject* o) { return IL::Pin(static_cast<Il2CppObject*>(o)); }
+void HostUnpin(uint32_t h) { IL::Unpin(h); }
+int64_t HostGetEnumValue(NCMKClass* k, const char* n, int64_t fallback) {
+    return IL::GetEnumValue(static_cast<Il2CppClass*>(k), n, fallback);
+}
+
 void BuildHostApi() {
-    g_host.structSize = sizeof(NCSHostApi);
-    g_host.apiVersion = NCS_LOADER_API;
-    g_host.loaderVersion = ncs::kLoaderVersion;
+    g_host.structSize = sizeof(NCMKHostApi);
+    g_host.apiVersion = NCMK_LOADER_API;
+    g_host.loaderVersion = ncmk::kLoaderVersion;
     g_host.packageName = G().package.c_str();
     g_host.gameVersion = G().gameVersion.c_str();
     g_host.unityVersion = G().unityVersion.c_str();
@@ -186,34 +208,49 @@ void BuildHostApi() {
     g_host.deviceName = G().device.displayName.c_str();
     g_host.deviceCodename = G().device.codename.c_str();
     g_host.deviceModel = G().device.model.c_str();
+    g_host.isMainThread = HostIsMainThread;
+    g_host.runOnMainThread = HostRunOnMainThread;
+    g_host.findMethodBySignature = HostFindMethodBySignature;
+    g_host.findNestedClass = HostFindNestedClass;
+    g_host.typeOf = HostTypeOf;
+    g_host.newObject = HostNewObject;
+    g_host.pin = HostPin;
+    g_host.unpin = HostUnpin;
+    g_host.getEnumValue = HostGetEnumValue;
+}
+
+// Unity main thread, once per frame (called by the dispatcher).
+void OnFrame(const ncmk::hooks::Frame& f) {
+    if (g_stopping.load()) return;
+    G().plugins.FrameAll(f.deltaTime, f.fixedSteps, f.sceneLoaded);
 }
 
 // ---------------------------------------------------------------------------- mod discovery
 
-std::vector<ncs::ModCandidate> DiscoverMods() {
-    std::vector<ncs::ModCandidate> out;
+std::vector<ncmk::ModCandidate> DiscoverMods() {
+    std::vector<ncmk::ModCandidate> out;
 
-    // 1) Mods embedded in the patched APK (lib/arm64-v8a/libncsmod_*.so).
+    // 1) Mods embedded in the patched APK (lib/arm64-v8a/libncmkmod_*.so, legacy libncsmod_*.so).
     const std::string& self = G().selfPath;
     size_t bang = self.find("!/");
     if (bang != std::string::npos) {
         // Loaded directly from the APK (extractNativeLibs=false): the linker resolves sonames itself.
-        for (const auto& name : ncs::ListEmbeddedMods(self.substr(0, bang))) out.push_back({name, "apk"});
+        for (const auto& name : ncmk::ListEmbeddedMods(self.substr(0, bang))) out.push_back({name, "apk"});
     } else if (!self.empty()) {
         std::string dir = self.substr(0, self.rfind('/'));
-        for (const auto& name : ncs::ListModFilesInDir(dir)) out.push_back({dir + "/" + name, "apk-extracted"});
+        for (const auto& name : ncmk::ListModFilesInDir(dir)) out.push_back({dir + "/" + name, "apk-extracted"});
     }
 
-    // 2) External mods from NightClubMods/Mods. Shared storage is mounted noexec, so each file is
+    // 2) External mods from NCMKMods/Mods. Shared storage is mounted noexec, so each file is
     //    copied into the app's private directory before dlopen.
     if (!G().modsRoot.empty()) {
         std::string ext = G().modsRoot + "/Mods";
-        auto files = ncs::ListModFilesInDir(ext);
-        std::string priv = ncs::AppDataDir();
-#if defined(NCS_HOST_TEST)
+        auto files = ncmk::ListModFilesInDir(ext);
+        std::string priv = ncmk::AppDataDir();
+#if defined(NCMK_HOST_TEST)
         if (priv.empty()) priv = G().modsRoot + "/Cache";
 #endif
-        if (!files.empty() && priv.empty()) NCS_LOGW("[NCS] App data dir not writable; external mods skipped (embed them in the APK).");
+        if (!files.empty() && priv.empty()) NCMK_LOGW("[NCMK] App data dir not writable; external mods skipped (embed them in the APK).");
         for (const auto& name : files) {
             if (priv.empty()) break;
             bool dup = false;
@@ -222,14 +259,14 @@ std::vector<ncs::ModCandidate> DiscoverMods() {
                     c.dlopenName.compare(c.dlopenName.size() - name.size(), name.size(), name) == 0)
                     dup = true;
             if (dup) {
-                NCS_LOGW("[NCS] %s exists both embedded and in Mods/ - using the embedded copy", name.c_str());
+                NCMK_LOGW("[NCMK] %s exists both embedded and in Mods/ - using the embedded copy", name.c_str());
                 continue;
             }
-            std::string cacheDir = priv + "/ncs_mods";
-            ncs::MakeDirs(cacheDir);
+            std::string cacheDir = priv + "/ncmk_mods";
+            ncmk::MakeDirs(cacheDir);
             std::string dst = cacheDir + "/" + name;
-            if (ncs::CopyFile(ext + "/" + name, dst)) out.push_back({dst, "external"});
-            else NCS_LOGE("[NCS] Could not copy %s to %s", name.c_str(), dst.c_str());
+            if (ncmk::CopyFile(ext + "/" + name, dst)) out.push_back({dst, "external"});
+            else NCMK_LOGE("[NCMK] Could not copy %s to %s", name.c_str(), dst.c_str());
         }
     }
     return out;
@@ -240,121 +277,153 @@ std::vector<ncs::ModCandidate> DiscoverMods() {
 void* WorkerMain(void*) {
     Stage(2, "Worker thread");
 
-    G().package = ncs::CurrentPackageName();
-    if (G().package != ncs::kTargetPackage) {
-        NCS_LOGE("[NCS] Package '%s' is not %s - loader stays idle", G().package.c_str(), ncs::kTargetPackage);
+    G().package = ncmk::CurrentPackageName();
+    if (G().package != ncmk::kTargetPackage) {
+        NCMK_LOGE("[NCMK] Package '%s' is not %s - loader stays idle", G().package.c_str(), ncmk::kTargetPackage);
         return nullptr;
     }
-    NCS_LOGI("[NCS] Package verified: %s", G().package.c_str());
-    G().device = ncs::DetectDevice();
-    NCS_LOGI("[NCS] Device: %s (%s / %s), Android %s (SDK %s)", G().device.displayName.c_str(), G().device.model.c_str(),
+    NCMK_LOGI("[NCMK] Package verified: %s", G().package.c_str());
+    G().device = ncmk::DetectDevice();
+    NCMK_LOGI("[NCMK] Device: %s (%s / %s), Android %s (SDK %s)", G().device.displayName.c_str(), G().device.model.c_str(),
              G().device.codename.c_str(), G().device.androidRelease.c_str(), G().device.sdk.c_str());
-    if (!G().device.known) NCS_LOGW("[NCS] Unrecognised headset - continuing (all Quests share the arm64 build)");
-    else if (!G().device.supported) NCS_LOGW("[NCS] %s is not a supported headset", G().device.displayName.c_str());
-    G().selfPath = ncs::SelfLibraryPath();
-    NCS_LOGI("[NCS] Loader path: %s", G().selfPath.c_str());
+    if (!G().device.known) NCMK_LOGW("[NCMK] Unrecognised headset - continuing (all Quests share the arm64 build)");
+    else if (!G().device.supported) NCMK_LOGW("[NCMK] %s is not a supported headset", G().device.displayName.c_str());
+    G().selfPath = ncmk::SelfLibraryPath();
+    NCMK_LOGI("[NCMK] Loader path: %s", G().selfPath.c_str());
 
-    G().modsRoot = ncs::ResolveModsRoot(G().package);
+    G().modsRoot = ncmk::ResolveModsRoot(G().package);
     if (G().modsRoot.empty()) {
-        NCS_LOGW("[NCS] No writable NightClubMods folder (storage permission?) - file logging and external mods disabled");
+        NCMK_LOGW("[NCMK] No writable NCMKMods folder (storage permission?) - file logging and external mods disabled");
     } else {
-        G().config = ncs::LoadConfig(G().modsRoot);
-        ncs::log::SetFileEnabled(G().config.logging);
-        if (G().config.logging && ncs::log::OpenFile(G().modsRoot + "/Logs/latest.log"))
-            NCS_LOGI("[NCS] Log file: %s", ncs::log::FilePath().c_str());
-        NCS_LOGI("[NCS] Mods root: %s", G().modsRoot.c_str());
+        G().config = ncmk::LoadConfig(G().modsRoot);
+        ncmk::log::SetFileEnabled(G().config.logging);
+        if (G().config.logging && ncmk::log::OpenFile(G().modsRoot + "/Logs/latest.log"))
+            NCMK_LOGI("[NCMK] Log file: %s", ncmk::log::FilePath().c_str());
+        NCMK_LOGI("[NCMK] Mods root: %s", G().modsRoot.c_str());
     }
-    G().safeMode = G().config.safeMode || ncs::SafeModeFlagPresent(G().modsRoot);
-    if (G().safeMode) NCS_LOGW("[NCS] SAFE MODE: no third-party mods will be loaded");
+    G().safeMode = G().config.safeMode || ncmk::SafeModeFlagPresent(G().modsRoot);
+    if (G().safeMode) NCMK_LOGW("[NCMK] SAFE MODE: no third-party mods will be loaded");
 
     if (!WaitFor([] { return LoadedLibrary("libunity.so") != nullptr; }, 120s, 50ms, "libunity.so")) return nullptr;
     Stage(3, "libunity detected");
 
-    NCS_LOGI("[NCS] Waiting for libil2cpp");
+    NCMK_LOGI("[NCMK] Waiting for libil2cpp");
     void* il2cpp = nullptr;
     if (!WaitFor([&] { return (il2cpp = LoadedLibrary("libil2cpp.so")) != nullptr; }, 180s, 50ms, "libil2cpp.so")) return nullptr;
     Stage(4, "libil2cpp detected");
-    NCS_LOGI("[NCSLoader] libil2cpp.so found");
+    NCMK_LOGI("[NCMK] libil2cpp.so found");
 
     if (!IL::ResolveExports(il2cpp)) {
-        NCS_LOGE("[NCS] IL2CPP API incomplete - mods disabled for this session");
+        NCMK_LOGE("[NCMK] IL2CPP API incomplete - mods disabled for this session");
         return nullptr;
     }
     Stage(5, "IL2CPP exports resolved");
-    NCS_LOGI("[NCSLoader] IL2CPP API ready");
+    NCMK_LOGI("[NCMK] IL2CPP API ready");
 
     if (!WaitFor([] { return IL::RuntimeInitialized(); }, 300s, 100ms, "IL2CPP runtime initialization")) return nullptr;
     if (!IL::AttachCurrentThread()) {
-        NCS_LOGE("[NCS] il2cpp_thread_attach failed");
+        NCMK_LOGE("[NCMK] il2cpp_thread_attach failed");
         return nullptr;
     }
     IL::SetReady(true);
     Stage(6, "Runtime initialized");
-    NCS_LOGI("[NCS] IL2CPP initialized");
+    NCMK_LOGI("[NCMK] IL2CPP initialized");
 
     G().assemblyNames = IL::ListAssemblies();
-    NCS_LOGI("[NCS] %zu assemblies:", G().assemblyNames.size());
+    NCMK_LOGI("[NCMK] %zu assemblies:", G().assemblyNames.size());
     for (const auto& a : G().assemblyNames) {
         size_t classes = IL::ClassCount(IL::FindAssembly(a.c_str()));
-        NCS_LOGI("[NCS]   %s (%zu classes)", a.c_str(), classes);
+        NCMK_LOGI("[NCMK]   %s (%zu classes)", a.c_str(), classes);
     }
 
-    std::string uv = NCS::Unity::GetUnityVersion();
-    std::string gv = NCS::Unity::GetApplicationVersion();
+    std::string uv = NCMK::Unity::GetUnityVersion();
+    std::string gv = NCMK::Unity::GetApplicationVersion();
     if (!uv.empty()) G().unityVersion = uv;
     if (!gv.empty()) G().gameVersion = gv;
-    NCS_LOGI("[NCS] Unity %s, game version %s", G().unityVersion.c_str(), G().gameVersion.c_str());
+    NCMK_LOGI("[NCMK] Unity %s, game version %s", G().unityVersion.c_str(), G().gameVersion.c_str());
 
     // FIFTH TEST: find a known class without changing anything.
     if (IL::FindClass("UnityEngine.CoreModule", "UnityEngine", "Application"))
-        NCS_LOGI("[NCSLoader] Class found: UnityEngine.Application");
+        NCMK_LOGI("[NCMK] Class found: UnityEngine.Application");
     else
-        NCS_LOGW("[NCS] UnityEngine.Application not found");
+        NCMK_LOGW("[NCMK] UnityEngine.Application not found");
 
     BuildHostApi();
     G().plugins.SetDisabledIds(G().config.disabledMods);
     Stage(7, "Plugin manager initialized");
 
     if (G().safeMode) {
-        NCS_LOGW("[NCS] Safe mode active - skipping mods");
+        NCMK_LOGW("[NCMK] Safe mode active - skipping mods");
     } else {
-        NCS_LOGI("[NCS] Loading mods");
+        NCMK_LOGI("[NCMK] Loading mods");
         G().plugins.LoadAll(DiscoverMods(), &g_host);
         for (const auto& m : G().plugins.Mods()) G().modNames.push_back(m.displayName);
     }
     Stage(8, "Mods loaded");
-    NCS_LOGI("[NCS] NCSLoader started successfully");
+    NCMK_LOGI("[NCMK] NCMK started successfully");
 
-    if (G().plugins.Mods().empty()) return nullptr;
+    if (G().safeMode) {
+        ncmk::hooks::Disable("Safe Mode");
+        NCMK_LOGI("[NCMK] STAGE 09 Main-thread dispatcher: not installed (Safe Mode)");
+        return nullptr;
+    }
+    if (G().plugins.Mods().empty()) {
+        ncmk::hooks::Disable("no mods loaded");
+        NCMK_LOGI("[NCMK] STAGE 09 Main-thread dispatcher: not installed (no mods loaded)");
+        return nullptr;
+    }
+    std::chrono::milliseconds perTarget = 5000ms;
+#if defined(NCMK_HOST_TEST)
+    if (const char* t = getenv("NCMK_HOOK_TIMEOUT_MS")) perTarget = std::chrono::milliseconds(atoi(t));
+#endif
+    ncmk::hooks::Install(ncmk::hooks::DefaultTargets(), OnFrame, perTarget);
 
-    // API 1 update tick: background thread, ~10 Hz. Not Unity's main thread.
+    if (!G().plugins.AnyBackgroundTick()) return nullptr;
+    // OnBackgroundTick (and the API 1 Update): loader worker thread, ~10 Hz. Not Unity's main thread.
+    g_loopRunning.store(true);
     auto last = std::chrono::steady_clock::now();
-    for (;;) {
+    while (!g_stopping.load()) {
         std::this_thread::sleep_for(100ms);
         auto now = std::chrono::steady_clock::now();
         float dt = std::chrono::duration<float>(now - last).count();
         last = now;
-        G().plugins.UpdateAll(dt);
+        if (!g_stopping.load()) G().plugins.BackgroundTickAll(dt);
     }
+    g_loopRunning.store(false);
     return nullptr;
 }
 
 }  // namespace
 
-extern "C" NCS_EXPORT const NCSHostApi* NCS_GetHostApi(void) { return IL::IsReady() ? &g_host : nullptr; }
+extern "C" NCMK_EXPORT const NCMKHostApi* NCMK_GetHostApi(void) { return IL::IsReady() ? &g_host : nullptr; }
+
+/// Unload: restores the dispatcher's MethodInfo pointers, stops the background tick and unloads
+/// every mod (NCMKMod_Unload). Call it from the Unity main thread or at shutdown.
+extern "C" NCMK_EXPORT void NCMK_Shutdown(void) {
+    if (g_stopping.exchange(true)) return;
+    ncmk::hooks::Restore();
+    for (int i = 0; i < 50 && g_loopRunning.load(); ++i) std::this_thread::sleep_for(20ms);
+    G().plugins.UnloadAll();
+    NCMK_LOGI("[NCMK] Shutdown complete");
+}
+
+__attribute__((destructor)) static void loader_fini() {
+    // Process exit or dlclose: never leave a MethodInfo pointing into an unmapped library.
+    ncmk::hooks::Restore();
+}
 
 __attribute__((constructor)) static void loader_init() {
     if (g_started.exchange(true)) return;
     G();  // construct the state before the worker thread exists
     Stage(1, "Loader constructor");
-    NCS_LOGI("[NCSLoader] Hello from NightClubModKit");
-    NCS_LOGI("[NCS] Loader %s (API %d)", ncs::kLoaderVersion, NCS_LOADER_API);
+    NCMK_LOGI("[NCMK] Hello from NCMK");
+    NCMK_LOGI("[NCMK] Loader %s (API %d)", ncmk::kLoaderVersion, NCMK_LOADER_API);
 
     pthread_t thread;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     pthread_attr_setstacksize(&attr, 1 << 20);
-    if (pthread_create(&thread, &attr, WorkerMain, nullptr) != 0) NCS_LOGE("[NCS] Failed to start worker thread");
+    if (pthread_create(&thread, &attr, WorkerMain, nullptr) != 0) NCMK_LOGE("[NCMK] Failed to start worker thread");
     pthread_attr_destroy(&attr);
 }

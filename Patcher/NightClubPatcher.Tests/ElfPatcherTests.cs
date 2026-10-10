@@ -18,10 +18,10 @@ public class ElfPatcherTests
     [Fact]
     public void AddNeeded_appends_dependency_and_keeps_existing_ones()
     {
-        var r = ElfNeededPatcher.AddNeeded(Fixtures.LibMainArm64, "libncsloader.so");
+        var r = ElfNeededPatcher.AddNeeded(Fixtures.LibMainArm64, "libncmkloader.so");
         Assert.True(r.Changed);
         var elf = new ElfFile(r.Data);
-        Assert.Equal(new[] { "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so", "libncsloader.so" }, elf.GetNeeded());
+        Assert.Equal(new[] { "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so", "libncmkloader.so" }, elf.GetNeeded());
         Assert.Equal("libmain.so", elf.GetSoName());
         Assert.True(elf.IsAarch64);
     }
@@ -29,8 +29,8 @@ public class ElfPatcherTests
     [Fact]
     public void AddNeeded_is_idempotent()
     {
-        var once = ElfNeededPatcher.AddNeeded(Fixtures.LibMainArm64, "libncsloader.so").Data;
-        var twice = ElfNeededPatcher.AddNeeded(once, "libncsloader.so");
+        var once = ElfNeededPatcher.AddNeeded(Fixtures.LibMainArm64, "libncmkloader.so").Data;
+        var twice = ElfNeededPatcher.AddNeeded(once, "libncmkloader.so");
         Assert.False(twice.Changed);
         Assert.Equal(once, twice.Data);
     }
@@ -39,7 +39,7 @@ public class ElfPatcherTests
     public void Original_bytes_are_untouched_except_headers()
     {
         var original = Fixtures.LibMainArm64;
-        var patched = ElfNeededPatcher.AddNeeded(original, "libncsloader.so").Data;
+        var patched = ElfNeededPatcher.AddNeeded(original, "libncmkloader.so").Data;
         var o = new ElfFile(original);
         // Every PT_LOAD of the original keeps its exact file content.
         foreach (var load in o.ProgramHeaders.Where(p => p.Type == ElfConst.PT_LOAD && p.Offset != 0))
@@ -53,7 +53,7 @@ public class ElfPatcherTests
     [Fact]
     public void Patched_layout_satisfies_bionic_loader_rules()
     {
-        var elf = new ElfFile(ElfNeededPatcher.AddNeeded(Fixtures.LibMainArm64, "libncsloader.so").Data);
+        var elf = new ElfFile(ElfNeededPatcher.AddNeeded(Fixtures.LibMainArm64, "libncmkloader.so").Data);
         var loads = elf.ProgramHeaders.Where(p => p.Type == ElfConst.PT_LOAD).ToList();
 
         // PT_LOAD sorted by vaddr, non-overlapping, offset/vaddr congruent modulo alignment.
@@ -89,20 +89,20 @@ public class ElfPatcherTests
         if (readelf == null) return;
         using var tmp = new TempDir();
         var path = tmp.File("libmain.so");
-        File.WriteAllBytes(path, ElfNeededPatcher.AddNeeded(Fixtures.LibMainArm64, "libncsloader.so").Data);
+        File.WriteAllBytes(path, ElfNeededPatcher.AddNeeded(Fixtures.LibMainArm64, "libncmkloader.so").Data);
         var psi = new ProcessStartInfo(readelf, $"-d -l -S -W \"{path}\"") { RedirectStandardOutput = true, RedirectStandardError = true };
         using var p = Process.Start(psi)!;
         var stdout = p.StandardOutput.ReadToEnd();
         var stderr = p.StandardError.ReadToEnd();
         p.WaitForExit();
         Assert.Equal(0, p.ExitCode);
-        Assert.Contains("Shared library: [libncsloader.so]", stdout);
+        Assert.Contains("Shared library: [libncmkloader.so]", stdout);
         Assert.DoesNotContain("Warning", stderr);
     }
 
     [Fact]
     public void Rejects_non_elf()
     {
-        Assert.ThrowsAny<Exception>(() => ElfNeededPatcher.AddNeeded(new byte[64], "libncsloader.so"));
+        Assert.ThrowsAny<Exception>(() => ElfNeededPatcher.AddNeeded(new byte[64], "libncmkloader.so"));
     }
 }

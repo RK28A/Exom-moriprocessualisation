@@ -17,7 +17,7 @@ public sealed class PatchOptions
     /// <summary>Allow patching builds whose fingerprints are not verified (advanced users only).</summary>
     public bool AllowUnverified { get; init; }
 
-    /// <summary>Embed libncsmod_*.so found next to the loader into lib/arm64-v8a/.</summary>
+    /// <summary>Embed libncmkmod_*.so found next to the loader into lib/arm64-v8a/.</summary>
     public bool EmbedMods { get; init; } = true;
 
     public string? LoaderPath { get; init; }
@@ -33,7 +33,7 @@ public sealed record PatchResult(bool Ok, string Message, string? OutputApk, IRe
 }
 
 /// <summary>
-/// FAST PATCH: the APK is edited as a ZIP. libmain.so gets a DT_NEEDED on libncsloader.so,
+/// FAST PATCH: the APK is edited as a ZIP. libmain.so gets a DT_NEEDED on libncmkloader.so,
 /// the loader (and optional embedded mods) are added uncompressed and page-aligned, a marker is
 /// written to assets/, the old signature is stripped, and the result is zipaligned and signed.
 /// </summary>
@@ -188,6 +188,22 @@ public sealed class PatchEngine
         return (injected, loaderSha);
     }
 
+    /// <summary>
+    /// Removes every kit file - current (libncmkloader.so, libncmkmod_*.so, assets/NCMK) and legacy
+    /// (libncsloader.so, libncsmod_*.so, assets/NightClubModKit) - and restores the original libmain.so.
+    /// </summary>
+    internal static void BuildUnsignedUnpatchedApk(ZipArchiveReader zip, byte[] originalLibMain, PatchMarker? marker, string output)
+    {
+        var plan = new ApkRewritePlan();
+        plan.ReplaceEntry(GameConstants.LibMainEntry, originalLibMain);
+        plan.Remove.UnionWith(GameConstants.AllLoaderEntries);
+        plan.Remove.UnionWith(GameConstants.AllPatchMarkerEntries);
+        plan.RemoveWhere.Add(GameConstants.IsModLibEntry);
+        foreach (var lib in marker?.InjectedLibraries ?? new())
+            plan.Remove.Add(GameConstants.LibDir + lib);
+        ApkRewriter.Rewrite(zip, output, plan);
+    }
+
     private IEnumerable<string> CollectMods(PatchOptions options, string loaderPath)
     {
         var mods = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -195,8 +211,9 @@ public sealed class PatchEngine
         {
             var dirs = new[] { Path.GetDirectoryName(loaderPath)! }.Concat(_paths.ModPayloadDirs()).Distinct();
             foreach (var dir in dirs.Where(Directory.Exists))
-                foreach (var f in Directory.EnumerateFiles(dir, GameConstants.ModLibPrefix + "*.so"))
-                    mods.TryAdd(Path.GetFileName(f), f);
+                foreach (var prefix in GameConstants.AllModLibPrefixes)
+                    foreach (var f in Directory.EnumerateFiles(dir, prefix + "*.so"))
+                        mods.TryAdd(Path.GetFileName(f), f);
         }
         foreach (var f in options.ExtraMods) mods[Path.GetFileName(f)] = f;
         return mods.Values;
@@ -220,7 +237,7 @@ public sealed class PatchEngine
     }
 
     /// <summary>
-    /// UNPATCH: removes NightClubModKit changes from a patched APK (original libmain.so from the
+    /// UNPATCH: removes NCMK changes from a patched APK (original libmain.so from the
     /// backup, loader/mods/marker removed) and re-signs it with the ModKit key, so it can be
     /// installed over the modded game without uninstalling.
     /// </summary>
@@ -234,7 +251,7 @@ public sealed class PatchEngine
         if (!patched.IsTargetPackage) return PatchResult.Fail("Refusing: input is not NightClub Simulator.");
         if (patched.Manifest.VersionCode != verification.Analysis.Manifest.VersionCode)
             return PatchResult.Fail("Patched APK and original backup are different game versions.");
-        if (!patched.IsPatchedByModKit) return PatchResult.Fail("This APK does not contain NightClubModKit modifications.");
+        if (!patched.IsPatchedByModKit) return PatchResult.Fail("This APK does not contain NCMK modifications.");
 
         var ws = PatchWorkspace.Create("unpatch");
         try
@@ -247,16 +264,9 @@ public sealed class PatchEngine
             File.Copy(patchedApk, working);
             using var zip = new ZipArchiveReader(working);
 
-            var plan = new ApkRewritePlan();
-            plan.ReplaceEntry(GameConstants.LibMainEntry, originalLibMain);
-            plan.Remove.Add(GameConstants.LoaderEntry);
-            plan.Remove.Add(GameConstants.PatchMarkerEntry);
-            plan.RemoveWhere.Add(n => n.StartsWith(GameConstants.LibDir + GameConstants.ModLibPrefix, StringComparison.Ordinal));
-            foreach (var lib in patched.Marker?.InjectedLibraries ?? new())
-                plan.Remove.Add(GameConstants.LibDir + lib);
-
+            if (patched.UsesLegacyNames) _log.Info("Legacy NightClubModKit patch detected (libncsloader.so) - removing the old names too.");
             var unsigned = Path.Combine(ws.Patched, "unpatched-unsigned.apk");
-            ApkRewriter.Rewrite(zip, unsigned, plan);
+            BuildUnsignedUnpatchedApk(zip, originalLibMain, patched.Marker, unsigned);
             var signed = Path.Combine(ws.Output, "unpatched.apk");
             _signer.AlignAndSign(unsigned, Path.Combine(ws.Patched, "unpatched-aligned.apk"), signed);
 
@@ -271,7 +281,7 @@ public sealed class PatchEngine
             var dest = Path.Combine(dir, "unpatched.apk");
             File.Copy(signed, dest, true);
             _log.Success("Unpatched APK: " + dest);
-            return new PatchResult(true, "Unpatched APK ready (signed with the NightClubModKit key).", dest,
+            return new PatchResult(true, "Unpatched APK ready (signed with the NCMK key).", dest,
                 _builds.SplitsFor(check.Manifest.VersionName!, check.Manifest.VersionCode!.Value, false), ws.Root);
         }
         catch (Exception ex)

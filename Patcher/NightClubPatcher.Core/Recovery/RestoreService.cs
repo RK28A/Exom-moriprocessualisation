@@ -57,7 +57,7 @@ public sealed class RestoreService
         var install = _installer.Install(adb, backup.ApkPath, splits, ui, originalJava, modKitJavaHash, "restore original");
         if (!install.Ok) return new RestoreResult(false, install.Message, steps);
 
-        Step("Handling NightClubModKit files on the device");
+        Step("Handling NCMK files on the device");
         HandleModFiles(adb, ui, modFiles);
 
         Step("Verifying package, version and signature");
@@ -68,10 +68,10 @@ public sealed class RestoreService
         if (originalJava != null && !DeviceGameState.SignerMatches(after, originalJava))
             return new RestoreResult(false, "Installed signature is not the original developer signature.", steps);
         if (after.LoaderFilePresent == true)
-            return new RestoreResult(false, "libncsloader.so is still present in the installed app.", steps);
+            return new RestoreResult(false, "libncmkloader.so is still present in the installed app.", steps);
 
         Step("Verifying original integrity (pulling installed APK)");
-        var tmp = Path.Combine(Path.GetTempPath(), "NightClubModKit", "verify-installed.apk");
+        var tmp = Path.Combine(Path.GetTempPath(), "NCMK", "verify-installed.apk");
         if (after.ApkPaths.Count > 0 && adb.Pull(after.ApkPaths[0], tmp))
         {
             var installedSha = Hashing.Sha256File(tmp);
@@ -117,7 +117,7 @@ public sealed class RestoreService
     {
         if (!adb.RemoteExists(GameConstants.DeviceModsRoot))
         {
-            _log.Info("No NightClubMods folder on the device.");
+            _log.Info("No NCMKMods folder on the device.");
             return;
         }
 
@@ -125,7 +125,7 @@ public sealed class RestoreService
         {
             var c = ui.Choose("Keep Mod Files?",
                 $"{GameConstants.DeviceModsRoot} exists on the Quest. The original game ignores it.",
-                new[] { "Keep", "Disable (rename to NightClubMods.disabled)", "Delete" });
+                new[] { "Keep", "Disable (rename to NCMKMods.disabled)", "Delete" });
             policy = c switch { 0 => ModFilesPolicy.Keep, 2 => ModFilesPolicy.Delete, _ => ModFilesPolicy.Disable };
         }
 
@@ -156,8 +156,8 @@ public sealed class RestoreService
                 break;
         }
 
-        // Loader leftovers that may exist in the fallback location (inside the app's external dir).
-        if (adb.RemoteExists(GameConstants.DeviceFallbackModsRoot))
-            _log.Info($"Note: {GameConstants.DeviceFallbackModsRoot} exists (fallback mod folder); it is part of the game's external data and was left untouched.");
+        // Folders written by older kits are reported, never touched automatically.
+        foreach (var legacy in GameConstants.LegacyDeviceModsRoots.Where(adb.RemoteExists))
+            _log.Info($"Note: {legacy} exists (mod folder of an older NightClubModKit build); it was left untouched.");
     }
 }

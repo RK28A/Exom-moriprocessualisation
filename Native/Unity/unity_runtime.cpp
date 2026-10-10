@@ -2,7 +2,7 @@
 
 #include "../Il2Cpp/il2cpp_api.h"
 
-namespace NCS {
+namespace NCMK {
 namespace Unity {
 
 namespace {
@@ -24,4 +24,4 @@ int GetFrameCount() {
 }
 
 }  // namespace Unity
-}  // namespace NCS
+}  // namespace NCMK

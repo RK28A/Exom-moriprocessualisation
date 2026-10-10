@@ -103,12 +103,12 @@ public partial class MainWindow : Window
         _svc.Log.Message += (level, msg) => Dispatcher.BeginInvoke(() => OnLog(level, msg));
         _clock.Tick += (_, _) => ActivityTime.Text = _opWatch.IsRunning ? $"{_opWatch.Elapsed:mm\\:ss}" : ActivityTime.Text;
         _watcher.Tick += async (_, _) => await WatchDevicesAsync();
-        SubtitleText.Text = $"NightClubModKit {typeof(ModKitService).Assembly.GetName().Version?.ToString(3)} - com.mandegames.NightClubSimulater - Quest 2 / Pro / 3 / 3S";
+        SubtitleText.Text = $"NCMK {typeof(ModKitService).Assembly.GetName().Version?.ToString(3)} - com.mandegames.NightClubSimulater - Quest 2 / Pro / 3 / 3S";
 
         StatusRight.Text = "Kit folder: " + _svc.Paths.Root;
         Loaded += async (_, _) =>
         {
-            _svc.Log.Info("NightClubModKit started. Kit folder: " + _svc.Paths.Root);
+            _svc.Log.Info("NCMK started. Kit folder: " + _svc.Paths.Root);
             await RefreshAsync();
             await RefreshSetupAsync();
             if (App.SmokeTest)
@@ -305,7 +305,7 @@ public partial class MainWindow : Window
         VersionCodeText.Text = (s.Installed?.VersionCode ?? a?.Manifest.VersionCode)?.ToString() ?? "?";
         InstallText.Text = s.Installed?.Describe() ?? "?";
         LoaderText.Text = (s.Installed?.Kind == InstallationKind.ModdedByModKit ? "Installed" : "Not installed") +
-                          (s.LoaderPath == null ? "  (libncsloader.so not built!)" : "");
+                          (s.LoaderPath == null ? "  (libncmkloader.so not built!)" : "");
         LoaderText.Foreground = s.LoaderPath == null ? Palette.Warn : Palette.Fg;
 
         UnityText.Text = a?.UnityVersion ?? "? (needs backup)";
@@ -456,7 +456,7 @@ public partial class MainWindow : Window
             var nativeToolsReady = tools.Where(t => Core.Signing.ToolSetup.NativeTools.Contains(t.Id)).All(t => t.Ready);
             BuildNativeButton.IsEnabled = nativeToolsReady && _svc.NativeBuilder.SourcesPresent;
             BuildNativeButton.ToolTip = BuildNativeButton.IsEnabled
-                ? "Build libncsloader.so with the bundled NDK, CMake and Ninja"
+                ? "Build libncmkloader.so with the bundled NDK, CMake and Ninja"
                 : "Install the Android NDK, CMake and Ninja first (Install / Repair Tools)";
             var allReady = tools.All(t => t.Ready);
             InstallRepairButton.Content = _toolInstallFailed && !allReady ? "Retry Install / Repair" : "Install / Repair Tools";
@@ -545,7 +545,7 @@ public partial class MainWindow : Window
             if (!p.Ok) { Report("PATCH + INSTALL", false, p.Message); return; }
             if (i == null || !i.Ok) { Report("PATCH + INSTALL", false, i?.Message ?? "Install skipped."); return; }
             Report("PATCH + INSTALL", true, i.Message + Environment.NewLine + Environment.NewLine +
-                   "Open Logcat and look for:" + Environment.NewLine + "[NCSLoader] Hello from NightClubModKit");
+                   "Open Logcat and look for:" + Environment.NewLine + "[NCMK] Hello from NCMK");
         });
         await RefreshAsync();
     }

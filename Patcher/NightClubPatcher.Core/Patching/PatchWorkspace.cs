@@ -3,7 +3,7 @@ using NightClubPatcher.Core.Infrastructure;
 namespace NightClubPatcher.Core.Patching;
 
 /// <summary>
-/// %TEMP%\NightClubModKit\&lt;timestamp&gt;\{input,unpacked,native,patched,output}.
+/// %TEMP%\NCMK\&lt;timestamp&gt;\{input,unpacked,native,patched,output}.
 /// The original backup is only ever copied INTO input/; nothing is written back.
 /// </summary>
 public sealed class PatchWorkspace

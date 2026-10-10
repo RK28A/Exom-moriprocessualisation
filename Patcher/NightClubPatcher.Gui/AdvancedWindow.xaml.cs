@@ -28,7 +28,7 @@ public partial class AdvancedWindow : Window
         {
             var sb = new StringBuilder();
             foreach (var (tool, path) in _svc.Tools.Report()) sb.AppendLine($"{tool,-38} {path ?? "NOT FOUND"}");
-            sb.AppendLine($"{"libncsloader.so",-38} {_svc.Paths.FindLoader() ?? "NOT BUILT (Native/build.ps1)"}");
+            sb.AppendLine($"{"libncmkloader.so",-38} {_svc.Paths.FindLoader() ?? "NOT BUILT (Native/build.ps1)"}");
             sb.AppendLine($"{"Kit root",-38} {_svc.Paths.Root}");
             sb.AppendLine($"{"Signing key",-38} {(_svc.Keys.Exists ? _svc.Paths.KeystorePath : "not created yet")}");
             ToolsInfo.Text = sb.ToString();
@@ -251,6 +251,16 @@ public partial class AdvancedWindow : Window
         if (dlg.ShowDialog(this) != true) return;
         var r = _svc.Backups.ImportFromFile(dlg.FileName, _svc.InspectOptions());
         _main.Report("Import original", r.Outcome == Core.Backup.BackupOutcome.Created, r.Message);
+    }
+
+    private async void PushMods_Click(object sender, RoutedEventArgs e) =>
+        await _main.RunAsync("Pushing mods and config", () => Task.Run(() => _svc.PushModsAndConfig().Ok));
+
+    private void OpenDeviceMods_Click(object sender, RoutedEventArgs e)
+    {
+        Directory.CreateDirectory(Path.Combine(_svc.Paths.DeviceMods, "Mods"));
+        Directory.CreateDirectory(Path.Combine(_svc.Paths.DeviceMods, "Config"));
+        Process.Start(new ProcessStartInfo(_svc.Paths.DeviceMods) { UseShellExecute = true });
     }
 
     private async void SafeOff_Click(object sender, RoutedEventArgs e) =>

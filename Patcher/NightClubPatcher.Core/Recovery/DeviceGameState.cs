@@ -18,7 +18,7 @@ public sealed class InstalledGameState
     {
         InstallationKind.NotInstalled => "Not installed",
         InstallationKind.Original => "Original",
-        InstallationKind.ModdedByModKit => "Modded (NightClubModKit)",
+        InstallationKind.ModdedByModKit => "Modded (NCMK)",
         InstallationKind.UnknownSigner => "Unknown signature (modified by another tool?)",
         _ => "Unknown",
     };
@@ -60,7 +60,7 @@ public static partial class DeviceGameState
             var dir = state.ApkPaths[0][..state.ApkPaths[0].LastIndexOf('/')];
             var ls = adb.Shell($"ls {dir}/lib/arm64/ 2>/dev/null");
             if (ls.Ok && ls.StdOut.Length > 0)
-                state.LoaderFilePresent = ls.StdOut.Contains(GameConstants.LoaderLibName);
+                state.LoaderFilePresent = GameConstants.AllLoaderLibNames.Any(n => ls.StdOut.Contains(n));
         }
 
         static string Norm(string? h) => (h ?? "").ToLowerInvariant().TrimStart('0');

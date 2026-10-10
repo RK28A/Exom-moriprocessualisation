@@ -3,10 +3,10 @@
 #include <string>
 #include <vector>
 
-namespace ncs {
+namespace ncmk {
 
 constexpr const char* kTargetPackage = "com.mandegames.NightClubSimulater";
-constexpr const char* kLoaderVersion = "0.2.0";
+constexpr const char* kLoaderVersion = "0.3.0";
 
 struct LoaderConfig {
     bool logging = true;
@@ -28,11 +28,11 @@ struct DeviceInfo {
 DeviceInfo DetectDevice();
 
 std::string CurrentPackageName();     // from /proc/self/cmdline
-std::string SelfLibraryPath();        // path of libncsloader.so (may contain "!/" when loaded from the APK)
+std::string SelfLibraryPath();        // path of libncmkloader.so (may contain "!/" when loaded from the APK)
 std::string AppDataDir();             // /data/user/0/<pkg> (or /data/data/<pkg>)
 
-/// Picks a writable NightClubMods root: /sdcard/NightClubMods, falling back to
-/// /sdcard/Android/data/<pkg>/files/NightClubMods. Creates Mods/Config/Logs/Cache/Overrides.
+/// Picks the writable NCMKMods root: /sdcard/Android/data/<pkg>/files/NCMKMods (the game has no
+/// storage permission, so its own external files folder is used). Creates Mods/Config/Logs/Cache/Overrides.
 std::string ResolveModsRoot(const std::string& package);
 
 LoaderConfig LoadConfig(const std::string& modsRoot);
@@ -42,10 +42,10 @@ bool MakeDirs(const std::string& path);
 bool FileExists(const std::string& path);
 bool CopyFile(const std::string& from, const std::string& to);
 
-/// Lists "lib/arm64-v8a/libncsmod_*.so" entries of an APK (reads the ZIP central directory).
+/// Lists "lib/arm64-v8a/libncmkmod_*.so" (and legacy libncsmod_*.so) entries of an APK (reads the ZIP central directory).
 std::vector<std::string> ListEmbeddedMods(const std::string& apkPath);
 
-/// Lists libncsmod_*.so files in a directory.
+/// Lists libncmkmod_*.so (and legacy libncsmod_*.so) files in a directory.
 std::vector<std::string> ListModFilesInDir(const std::string& dir);
 
-}  // namespace ncs
+}  // namespace ncmk

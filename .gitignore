@@ -33,3 +33,9 @@ Tools/jdk/
 # Windows release output (Build-Windows.ps1)
 Release/
 artifacts/
+
+# Your own external mods / configs pushed to the headset (folder structure is kept)
+DeviceMods/Mods/*
+DeviceMods/Config/*
+!DeviceMods/Mods/.gitkeep
+!DeviceMods/Config/.gitkeep

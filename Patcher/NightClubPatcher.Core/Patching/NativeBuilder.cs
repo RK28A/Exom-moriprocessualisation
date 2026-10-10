@@ -9,7 +9,7 @@ public sealed record NativeBuildResult(bool Ok, string Message, string? LoaderPa
 /// <summary>
 /// BUILD NATIVE LOADER: runs Native/build.ps1 (Windows) or Native/build.sh with the portable tools
 /// from Tools/ prepended to the PATH of the build process only (the user's PATH is never changed).
-/// Output: Native/out/arm64-v8a/libncsloader.so (+ libncsmod_*.so) - where the patcher looks first.
+/// Output: Native/out/arm64-v8a/libncmkloader.so (+ libncmkmod_*.so) - where the patcher looks first.
 /// </summary>
 public sealed class NativeBuilder
 {
@@ -30,7 +30,7 @@ public sealed class NativeBuilder
 
     public bool SourcesPresent =>
         File.Exists(Path.Combine(NativeDir, "CMakeLists.txt")) &&
-        File.Exists(Path.Combine(_paths.Root, "SDK", "Core", "ncs_mod_api.h"));
+        File.Exists(Path.Combine(_paths.Root, "SDK", "Core", "ncmk_mod_api.h"));
 
     /// <summary>Loader built and valid (AArch64 ELF).</summary>
     public bool LoaderReady(out string? path)
@@ -96,14 +96,14 @@ public sealed class NativeBuilder
         if (exit != 0)
             return new NativeBuildResult(false, $"Native build failed (exit code {exit}). See the log for the compiler output.", null, Array.Empty<string>());
 
-        _log.Step("Verifying libncsloader.so");
+        _log.Step("Verifying libncmkloader.so");
         if (!File.Exists(OutputLoader))
             return new NativeBuildResult(false, $"The build finished but {OutputLoader} was not produced.", null, Array.Empty<string>());
         if (File.GetLastWriteTimeUtc(OutputLoader) < started)
-            return new NativeBuildResult(false, "libncsloader.so was not rebuilt (stale file).", null, Array.Empty<string>());
+            return new NativeBuildResult(false, "libncmkloader.so was not rebuilt (stale file).", null, Array.Empty<string>());
         var elf = new ElfFile(File.ReadAllBytes(OutputLoader));
         if (!elf.IsAarch64)
-            return new NativeBuildResult(false, $"libncsloader.so is {elf.MachineName}, expected AArch64.", null, Array.Empty<string>());
+            return new NativeBuildResult(false, $"libncmkloader.so is {elf.MachineName}, expected AArch64.", null, Array.Empty<string>());
 
         var libs = Directory.EnumerateFiles(OutputDir, "*.so").Select(Path.GetFileName).OfType<string>().OrderBy(n => n).ToList();
         _log.Success($"Native loader ready: {OutputLoader}");

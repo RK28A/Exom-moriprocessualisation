@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds libncsloader.so + sample mods for arm64-v8a. Output: Native/out/arm64-v8a/
+# Builds libncmkloader.so + sample mods for arm64-v8a. Output: Native/out/arm64-v8a/
 # Tool order: NDK = $1, <kit>/Tools/ndk, ANDROID_NDK_HOME, ANDROID_NDK_ROOT, ANDROID_NDK_LATEST_HOME
 #             cmake/ninja = $CMAKE/$NINJA, <kit>/Tools/cmake/bin, <kit>/Tools/ninja, PATH
 set -euo pipefail
@@ -33,5 +33,5 @@ rm -rf "$HERE/build-android"
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 -DANDROID_STL=c++_static -DCMAKE_BUILD_TYPE=Release
 "$CMAKE_BIN" --build "$HERE/build-android" -j
-test -f "$HERE/out/arm64-v8a/libncsloader.so"
+test -f "$HERE/out/arm64-v8a/libncmkloader.so"
 ls -la "$HERE/out/arm64-v8a"
