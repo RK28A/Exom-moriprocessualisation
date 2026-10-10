@@ -12,7 +12,9 @@ internal static class Program
     private const string Help = """
         NightClub Simulator Mod Patcher (NightClubModKit) - target: com.mandegames.NightClubSimulater
 
-        Usage: NightClubPatcher.exe <command> [options]
+        Advanced command-line interface. The main application is the GUI: NightClubPatcher.exe
+
+        Usage: NightClubPatcher.Cli.exe <command> [options]
 
         Main commands
           --detect                     Detect Quest, game, version, backup and installation state
@@ -174,7 +176,7 @@ internal static class Program
                 Report(svc, p.Ok, p.Message);
                 if (i != null) Report(svc, i.Ok, i.Message);
                 if (i?.Ok == true)
-                    svc.Log.Info("Check the loader with: NightClubPatcher.exe --logcat   (expect '[NCSLoader] Hello from NightClubModKit')");
+                    svc.Log.Info("Check the loader with: NightClubPatcher.Cli.exe --logcat   (expect '[NCSLoader] Hello from NightClubModKit')");
                 return p.Ok && i?.Ok == true ? 0 : 2;
             }
 

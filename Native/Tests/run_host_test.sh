@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end host test (Linux x86-64):
 #   1. builds libncsloader.so, sample mods, a fake libil2cpp/libunity and an unpatched libmain
-#   2. patches libmain with the C# ELF patcher (NightClubPatcher --elf-add-needed)
+#   2. patches libmain with the C# ELF patcher (NightClubPatcher.Cli --elf-add-needed)
 #   3. runs a fake "game" that loads libmain -> libunity -> libil2cpp, like Unity on Android
 #   4. checks the loader output for every startup stage
 set -euo pipefail

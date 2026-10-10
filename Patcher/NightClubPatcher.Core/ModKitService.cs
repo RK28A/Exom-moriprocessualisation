@@ -218,6 +218,7 @@ public sealed class ModKitService
     /// </summary>
     public bool SelectDevice(IUserInteraction ui, DevicePurpose purpose)
     {
+        if (purpose != DevicePurpose.Operation) Log.Step("Detecting Quest");
         if (ui is NonInteractive || (DeviceLockedByUser && Adb.PreferredSerial != null))
             return AutoSelectDevice(ui, purpose);
         if (!Adb.Available)

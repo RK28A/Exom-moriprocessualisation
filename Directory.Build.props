@@ -3,7 +3,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.1.0</Version>
+    <Version>0.3.0</Version>
     <Company>NightClubModKit</Company>
     <Product>NightClubModKit</Product>
     <!-- Allows building the WPF project on non-Windows CI hosts (it only runs on Windows). -->

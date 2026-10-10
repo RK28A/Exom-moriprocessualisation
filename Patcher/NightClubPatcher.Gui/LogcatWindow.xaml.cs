@@ -19,22 +19,35 @@ public partial class LogcatWindow : Window
         Closed += (_, _) => Stop();
     }
 
-    private void Start(bool clear)
+    /// <summary>adb calls run on a worker thread; lines are marshalled to the UI in batches.</summary>
+    private async void Start(bool clear)
     {
         Stop();
-        if (!_svc.ConnectDevice(out var msg))
+        StatusText.Text = "connecting...";
+        try
         {
-            StatusText.Text = msg;
-            return;
+            var (ok, msg, proc) = await Task.Run(() =>
+            {
+                if (!_svc.ConnectDevice(out var m)) return (false, m, (Process?)null);
+                var p = _svc.Logcat.Stream(_svc.Adb, line => Dispatcher.BeginInvoke(() => Append(line)), clear);
+                return (true, m, p);
+            });
+            if (!ok) { StatusText.Text = msg; return; }
+            _proc = proc;
+            StatusText.Text = "streaming...";
         }
-        _proc = _svc.Logcat.Stream(_svc.Adb, line => Dispatcher.BeginInvoke(() =>
+        catch (Exception ex)
         {
-            if (LoaderOnly.IsChecked == true && !line.Contains("NCS")) return;
-            Output.AppendText(line + Environment.NewLine);
-            if (Output.LineCount > 20000) Output.Clear();
-            Output.ScrollToEnd();
-        }), clear);
-        StatusText.Text = "streaming...";
+            StatusText.Text = "logcat failed: " + ex.Message;
+        }
+    }
+
+    private void Append(string line)
+    {
+        if (LoaderOnly.IsChecked == true && !line.Contains("NCS")) return;
+        Output.AppendText(line + Environment.NewLine);
+        if (Output.LineCount > 20000) Output.Clear();
+        Output.ScrollToEnd();
     }
 
     private void Stop()

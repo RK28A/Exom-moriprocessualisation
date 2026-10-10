@@ -82,8 +82,8 @@ Patcher/
   NightClubPatcher.Core/    all logic (shared by GUI + CLI)
     Adb/  Apk/  Android/  Elf/  Signing/  Backup/  Recovery/  Unity/  Il2Cpp/
     Diagnostics/  Versions/  Patching/  Builds/  Infrastructure/
-  NightClubPatcher.Gui/     WPF app (Windows)
-  NightClubPatcher.Cli/     NightClubPatcher.exe
+  NightClubPatcher.Gui/     WPF app - MAIN APPLICATION -> NightClubPatcher.exe
+  NightClubPatcher.Cli/     command line (advanced)    -> NightClubPatcher.Cli.exe
   NightClubPatcher.Tests/   xUnit tests (+ real AArch64 ELF fixtures)
 Native/                     libncsloader.so (C++17, Android NDK)
   Loader/ Il2Cpp/ Unity/ Logging/ Plugins/ Hooks/ Tests/
@@ -99,30 +99,103 @@ inside `NightClubPatcher.Core` so the GUI and CLI share one implementation.
 
 ---
 
-## Requirements (Windows)
+## Quick start on Windows (no build)
 
-1. **.NET 8 SDK** (to build) or .NET 8 Desktop Runtime (to run a published build).
-2. **adb, zipalign, apksigner, Java 17** — **installed automatically.** On first start the app
-   detects what is missing and offers **Install tools**: Android platform-tools and the latest
-   stable build-tools are downloaded from Google's official SDK repository (SHA-1 verified, Android
-   SDK License), Java from the Microsoft Build of OpenJDK, all into `Tools/`.
-   CLI: `--install-tools`. An existing Android SDK / JDK / `PATH` install is used if present.
-4. **Android NDK r26+** to build the native loader.
-5. Quest in **developer mode**, USB debugging authorized.
+1. Download the **NightClubPatcher-Release-win-x64** artifact from the latest successful
+   *build* run in GitHub Actions (it is the `Release\` folder described below) and unzip it.
+2. Double-click **`NightClubPatcher.exe`**: the graphical patcher opens. No .NET install is
+   needed (self-contained).
+3. On first start, click **Install tools** when offered (adb, zipalign, apksigner, Java).
+4. Connect the Quest by USB (developer mode on), accept *Allow USB debugging* in the headset,
+   then press **Patch + Install**.
 
-## Build
+## Requirements to build (Windows)
+
+1. **Visual Studio 2022 / 2026** with the *.NET desktop development* workload, or the
+   **.NET 8 SDK** alone (`dotnet --list-sdks` must show 8.0.x or newer).
+2. **adb, zipalign, apksigner, Java 17** — **installed automatically** by the app (Install tools):
+   Android platform-tools and the latest stable build-tools from Google's official SDK repository
+   (SHA-1 verified, Android SDK License), Java from the Microsoft Build of OpenJDK, all into
+   `Tools\`. CLI: `NightClubPatcher.Cli.exe --install-tools`. An existing Android SDK / JDK /
+   `PATH` install is used if present.
+3. **Android NDK r26+** only to build the native loader (`libncsloader.so`); CI builds it too.
+4. Quest in **developer mode**, USB debugging authorized.
+
+## Build & run on Windows
+
+### Visual Studio (F5)
+
+1. Open **`NightClubModKit.sln`**. Solution Explorer shows the *Patcher* folder with
+   `NightClubPatcher.Gui` (startup project, listed first), `NightClubPatcher.Core`,
+   `NightClubPatcher.Cli` and `NightClubPatcher.Tests`.
+2. Press **F5**: the WPF window opens. (If Visual Studio remembered an older startup project from a
+   previous `.vs` folder: right-click `NightClubPatcher.Gui` → *Set as Startup Project*, or delete
+   the hidden `.vs` folder.)
+3. When running from Visual Studio the kit folder is the repository root (`Backups\`, `Builds\`,
+   `Logs\`, `Keys\`, `Tools\`, `Versions\` next to the `.sln`).
+
+### Command line
 
 ```powershell
-# 1. native loader + sample mods  ->  Native\out\arm64-v8a\*.so
-.\Native\build.ps1                       # or: .\Native\build.ps1 -Ndk C:\path\to\ndk
+# optional: native loader + sample mods -> Native\out\arm64-v8a\*.so  (Android NDK)
+.\Native\build.ps1
 
-# 2. patcher
-dotnet build NightClubModKit.sln -c Release
-dotnet test  Patcher\NightClubPatcher.Tests
+# build everything, run tests, publish, assemble Release\
+.\Build-Windows.ps1                 # add -BuildNative to also run Native\build.ps1,
+                                    #     -SmokeTest to launch the GUI/CLI once after publishing
+
+# run
+.\Release\NightClubPatcher.exe      # graphical patcher (main application)
+.\Release\NightClubPatcher.Cli.exe --help
 ```
 
-CI (`.github/workflows/build.yml`) builds the loader with the NDK, runs the unit tests and the
-host end-to-end test, and publishes the Windows GUI/CLI as artifacts.
+`Build-Windows.ps1` builds Core, CLI and GUI, runs the tests, publishes the GUI and the CLI as
+**self-contained single-file** `win-x64` executables, and assembles:
+
+```
+Release\
+├── NightClubPatcher.exe        WPF GUI - main application (PE subsystem: Windows GUI, no console)
+├── NightClubPatcher.Cli.exe    command line, advanced usage
+├── libncsloader.so             native loader (when built)
+├── libncsmod_*.so              sample mods (when built; embedded into the APK by the patcher)
+├── Versions\                   game version profiles
+├── Tools\                      adb / zipalign / apksigner / jdk (auto-installed on first start)
+├── Logs\
+└── NightClubModKit.root        marks this folder as the kit root
+```
+
+The script **never deletes** an existing `Release\` folder: once used, it holds `Backups\` (your
+original APK) and `Keys\` (your signing key). It only replaces the executables, adds missing
+profiles/tools and keeps version profiles you already pinned.
+
+Plain `dotnet` equivalents:
+
+```powershell
+dotnet build NightClubModKit.sln -c Release
+dotnet test  Patcher\NightClubPatcher.Tests -c Release
+dotnet run   --project Patcher\NightClubPatcher.Gui          # GUI
+dotnet run   --project Patcher\NightClubPatcher.Cli -- --help
+dotnet publish Patcher\NightClubPatcher.Gui -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o Release
+```
+
+### Architecture
+
+```
+NightClubPatcher.Gui  (WPF, NightClubPatcher.exe)      ─┐
+NightClubPatcher.Cli  (console, NightClubPatcher.Cli.exe) ─┼─►  NightClubPatcher.Core
+NightClubPatcher.Tests                                  ─┘     (ADB, APK, ELF, backup, signing,
+                                                                 install, restore, diagnostics)
+```
+
+The GUI and the CLI contain no patching logic; they only call Core services. Long operations
+(adb pull, patching, signing, installing, restoring, logcat) run on background tasks, so the
+window never freezes; errors open a dialog with the technical details (and are written to
+`Logs\`), never a crash.
+
+CI (`.github/workflows/build.yml`) builds the loader with the NDK, runs the unit tests and the host
+end-to-end test, then runs `Build-Windows.ps1 -SmokeTest` on Windows (verifying that
+`NightClubPatcher.exe` is a GUI executable that opens its WPF window and that the CLI works) and
+uploads the `Release\` folder as an artifact.
 
 ## The app
 
@@ -170,24 +243,26 @@ CLI equivalents: `--check-adb` (binary, version, server, devices), `--restart-ad
 To run *only* the first milestone (loader, no mods), patch with `--no-mods` or untick
 *Embed libncsmod_*.so* in Advanced.
 
-## CLI
+## CLI (advanced)
+
+Everything the GUI does is also available from `NightClubPatcher.Cli.exe`:
 
 ```
-NightClubPatcher.exe --detect              detect Quest / game / version / state
-NightClubPatcher.exe --backup              create the immutable original backup
-NightClubPatcher.exe --patch               build patched-current.apk
-NightClubPatcher.exe --install             install patched-current.apk
-NightClubPatcher.exe --patch-install --launch
-NightClubPatcher.exe --restore             RESTORE ORIGINAL
-NightClubPatcher.exe --emergency-restore [original.apk]
-NightClubPatcher.exe --unpatch             remove ModKit changes (keeps ModKit signature, no uninstall)
-NightClubPatcher.exe --diagnose            all checks -> Logs/diagnostic.txt
-NightClubPatcher.exe --logcat              filtered logcat
-NightClubPatcher.exe --safe-mode on|off
-NightClubPatcher.exe --install-previous    crash protection: go back one modded build
-NightClubPatcher.exe --pin-fingerprints | --analyze <apk> | --import-backup <apk> | --tools
-NightClubPatcher.exe --list-devices        headsets connected (model, serial, compatibility)
-NightClubPatcher.exe --device <serial> --patch-install   use that headset, no prompt
+NightClubPatcher.Cli.exe --detect              detect Quest / game / version / state
+NightClubPatcher.Cli.exe --backup              create the immutable original backup
+NightClubPatcher.Cli.exe --patch               build patched-current.apk
+NightClubPatcher.Cli.exe --install             install patched-current.apk
+NightClubPatcher.Cli.exe --patch-install --launch
+NightClubPatcher.Cli.exe --restore             RESTORE ORIGINAL
+NightClubPatcher.Cli.exe --emergency-restore [original.apk]
+NightClubPatcher.Cli.exe --unpatch             remove ModKit changes (keeps ModKit signature, no uninstall)
+NightClubPatcher.Cli.exe --diagnose            all checks -> Logs/diagnostic.txt
+NightClubPatcher.Cli.exe --logcat              filtered logcat
+NightClubPatcher.Cli.exe --safe-mode on|off
+NightClubPatcher.Cli.exe --install-previous    crash protection: go back one modded build
+NightClubPatcher.Cli.exe --pin-fingerprints | --analyze <apk> | --import-backup <apk> | --tools
+NightClubPatcher.Cli.exe --list-devices        headsets connected (model, serial, compatibility)
+NightClubPatcher.Cli.exe --device <serial> --patch-install   use that headset, no prompt
 ```
 
 Options: `--allow-unverified`, `--no-mods`, `--loader <path>`, `--mods keep|disable|delete`,

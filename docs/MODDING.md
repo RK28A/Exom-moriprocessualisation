@@ -72,7 +72,7 @@ check `NCS_HOST_HAS(api, deviceName)` first.
 ## Debugging
 
 ```
-NightClubPatcher.exe --logcat          # or GUI: OPEN LOGCAT, tick "NCS only"
+NightClubPatcher.Cli.exe --logcat          # or GUI: OPEN LOGCAT, tick "NCS only"
 adb shell cat /sdcard/NightClubMods/Logs/latest.log
 ```
 

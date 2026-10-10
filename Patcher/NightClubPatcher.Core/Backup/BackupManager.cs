@@ -154,7 +154,8 @@ public sealed class BackupManager
         Directory.CreateDirectory(incoming);
         try
         {
-            _log.Step($"Pulling {paths[0]}");
+            _log.Step("Pulling original APK");
+            _log.Info(paths[0]);
             var basePulled = Path.Combine(incoming, "base.apk");
             if (!adb.Pull(paths[0], basePulled))
                 return new BackupResult(BackupOutcome.Failed, "adb pull of base.apk failed.", null);

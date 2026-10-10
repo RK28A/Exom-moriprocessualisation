@@ -15,5 +15,5 @@
   "originalApkSha256": null,
   "originalSignerSha256": null,
   "verified": false,
-  "notes": "File fingerprints are recorded from your own verified original backup with 'NightClubPatcher.exe --pin-fingerprints' (GUI: Advanced > Pin fingerprints). Until then automatic patching requires 'Allow unverified build'."
+  "notes": "File fingerprints are recorded from your own verified original backup with 'NightClubPatcher.Cli.exe --pin-fingerprints' (GUI: Advanced > Pin fingerprints). Until then automatic patching requires 'Allow unverified build'."
 }

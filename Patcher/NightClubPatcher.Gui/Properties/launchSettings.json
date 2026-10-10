@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "NightClubPatcher (GUI)": {
+      "commandName": "Project"
+    },
+    "NightClubPatcher (GUI smoke test)": {
+      "commandName": "Project",
+      "commandLineArgs": "--smoke-test"
+    }
+  }
+}

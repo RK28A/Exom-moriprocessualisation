@@ -16,11 +16,21 @@ namespace {
 
 constexpr const char* kTag = "NCSLoader";
 
-std::mutex g_mutex;
+// Only constant-initialized globals here: logging is used from the loader constructor, which
+// may run before this file's dynamic initializers. Non-trivial state lives behind accessors.
+std::mutex g_mutex;           // constexpr constructor
 FILE* g_file = nullptr;
 bool g_fileEnabled = true;
-std::string g_path;
-std::vector<std::string> g_early;  // lines logged before the file was opened
+
+std::string& PathRef() {
+    static std::string* p = new std::string();
+    return *p;
+}
+
+std::vector<std::string>& Early() {  // lines logged before the file was opened
+    static std::vector<std::string>* v = new std::vector<std::string>();
+    return *v;
+}
 
 const char* LevelName(Level l) {
     switch (l) {
@@ -53,8 +63,8 @@ void Emit(Level level, const char* msg) {
     if (g_file) {
         fputs(line.c_str(), g_file);
         fflush(g_file);
-    } else if (g_fileEnabled && g_early.size() < 512) {
-        g_early.push_back(line);
+    } else if (g_fileEnabled && Early().size() < 512) {
+        Early().push_back(line);
     }
 }
 
@@ -78,9 +88,9 @@ bool OpenFile(const std::string& path) {
     if (!f) return false;
     if (g_file) fclose(g_file);
     g_file = f;
-    g_path = path;
-    for (auto& l : g_early) fputs(l.c_str(), g_file);
-    g_early.clear();
+    PathRef() = path;
+    for (auto& l : Early()) fputs(l.c_str(), g_file);
+    Early().clear();
     fflush(g_file);
     return true;
 }
@@ -89,7 +99,7 @@ void SetFileEnabled(bool enabled) {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_fileEnabled = enabled;
     if (!enabled) {
-        g_early.clear();
+        Early().clear();
         if (g_file) {
             fclose(g_file);
             g_file = nullptr;
@@ -97,7 +107,7 @@ void SetFileEnabled(bool enabled) {
     }
 }
 
-const std::string& FilePath() { return g_path; }
+const std::string& FilePath() { return PathRef(); }
 
 }  // namespace log
 }  // namespace ncs

@@ -23,7 +23,7 @@ public sealed class ApkSigningService
         var zipalign = _tools.FindZipalign() ?? throw new InvalidOperationException(
             "zipalign was not found. Copy it to Tools/zipalign/ or install Android SDK build-tools.");
         if (File.Exists(output)) File.Delete(output);
-        _log.Step("zipalign");
+        _log.Step("Aligning APK (zipalign)");
         var r = ProcessRunner.Run(zipalign, new[] { "-f", "-p", "4", input, output });
         if (!r.Ok) throw new InvalidOperationException("zipalign failed: " + r.Combined);
         var check = ProcessRunner.Run(zipalign, new[] { "-c", "-p", "4", output });
@@ -38,7 +38,7 @@ public sealed class ApkSigningService
             "apksigner.jar was not found. Copy build-tools/<ver>/lib/apksigner.jar to Tools/apksigner/ or install Android SDK build-tools.");
         if (File.Exists(output)) File.Delete(output);
 
-        _log.Step("apksigner sign");
+        _log.Step("Signing APK");
         var env = new Dictionary<string, string> { ["NCS_KS_PASS"] = cfg.Password };
         var r = ProcessRunner.Run(java, new[]
         {

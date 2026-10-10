@@ -145,12 +145,13 @@ public sealed class PatchEngine
         var libmain = zip.ReadAllBytes(libmainEntry);
         File.WriteAllBytes(Path.Combine(ws.Unpacked, "libmain.so"), libmain);
 
-        log.Step($"Adding DT_NEEDED {GameConstants.LoaderLibName} to libmain.so");
+        log.Step($"Patching libmain.so (DT_NEEDED {GameConstants.LoaderLibName})");
         var elfResult = ElfNeededPatcher.AddNeeded(libmain, GameConstants.LoaderLibName);
         log.Info(elfResult.Message);
         File.WriteAllBytes(Path.Combine(ws.Native, "libmain.so"), elfResult.Data);
         File.WriteAllBytes(Path.Combine(ws.Native, GameConstants.LoaderLibName), loaderBytes);
 
+        log.Step($"Injecting {GameConstants.LoaderLibName}");
         var plan = new ApkRewritePlan();
         plan.ReplaceEntry(GameConstants.LibMainEntry, elfResult.Data);
         plan.AddOrReplace(GameConstants.LoaderEntry, loaderBytes, EntryCompression.Stored, zip);

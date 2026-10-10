@@ -103,10 +103,17 @@ public partial class MainWindow : Window
         _watcher.Tick += async (_, _) => await WatchDevicesAsync();
         SubtitleText.Text = $"NightClubModKit {typeof(ModKitService).Assembly.GetName().Version?.ToString(3)} - com.mandegames.NightClubSimulater - Quest 2 / Pro / 3 / 3S";
 
+        StatusRight.Text = "Kit folder: " + _svc.Paths.Root;
         Loaded += async (_, _) =>
         {
             _svc.Log.Info("NightClubModKit started. Kit folder: " + _svc.Paths.Root);
             await RefreshAsync();
+            if (App.SmokeTest)
+            {
+                // CI: the WPF window opened and the first detection completed without errors.
+                Application.Current.Shutdown(0);
+                return;
+            }
             _watcher.Start();
             if (_svc.ToolSetup.Missing().Count > 0) await OfferToolInstallAsync();
         };
@@ -121,6 +128,7 @@ public partial class MainWindow : Window
         if (level == LogLevel.Debug) return;
         if (level == LogLevel.Step)
         {
+            if (_busy) StatusText.Text = msg + "...";
             _currentStep?.Done();
             _currentStep = new StepEntry { Title = msg };
             _steps.Add(_currentStep);
@@ -176,6 +184,7 @@ public partial class MainWindow : Window
         _steps.Clear();
         _currentStep = null;
         ActivityTitle.Text = label + "...";
+        StatusText.Text = label + "...";
         ActivityTitle.Foreground = Palette.Fg;
         Progress.IsIndeterminate = true;
         _opWatch.Restart();
@@ -189,7 +198,8 @@ public partial class MainWindow : Window
         {
             _lastResult = false;
             _svc.Log.Error(ex.Message);
-            MessageBox.Show(this, ex.Message, label, MessageBoxButton.OK, MessageBoxImage.Error);
+            App.WriteCrashLog(ex);
+            ErrorDialog.Show(this, label + " failed", ex.Message, ex.ToString(), _svc.Paths.Logs);
         }
         finally
         {
@@ -210,6 +220,7 @@ public partial class MainWindow : Window
                 _ => label + " - finished",
             };
             ActivityTitle.Foreground = _lastResult switch { true => Palette.Ok, false => Palette.Danger, _ => Palette.Fg };
+            StatusText.Text = _lastResult switch { true => "Done.", false => label + " failed - see the log below.", _ => "Ready." };
             _busy = false;
             Actions.IsEnabled = true;
         }
@@ -223,10 +234,19 @@ public partial class MainWindow : Window
     {
         if (_refreshing) return;
         _refreshing = true;
+        if (!_busy) StatusText.Text = "Detecting ADB, Quest and NightClub Simulator...";
         try
         {
             var s = await Task.Run(() => _svc.Detect());
             ShowStatus(s);
+            if (!_busy) StatusText.Text = s.Device switch
+            {
+                DeviceState.Connected => "Ready.",
+                DeviceState.Unauthorized => "Waiting: accept 'Allow USB debugging' in the headset.",
+                DeviceState.MultipleDevices => "Several headsets connected: choose one in the HEADSET card.",
+                DeviceState.NoAdb => "ADB is not available: click Install tools.",
+                _ => "Ready (no headset connected).",
+            };
         }
         catch (Exception ex)
         {
@@ -255,6 +275,15 @@ public partial class MainWindow : Window
             _ => "No headset",
         };
         QuestText.Text = s.Device == DeviceState.Connected ? $"{s.DeviceSerial} - {s.AndroidVersion}" : s.DeviceText;
+        (AuthText.Text, AuthText.Foreground) = s.Device switch
+        {
+            DeviceState.Connected => ("Authorization: USB debugging allowed", Palette.Ok),
+            DeviceState.Unauthorized => ("Authorization: waiting - accept 'Allow USB debugging' in the headset", Palette.Warn),
+            DeviceState.Offline => ("Authorization: device offline - reconnect or Restart ADB", Palette.Warn),
+            DeviceState.MultipleDevices => ("Authorization: select a headset above", Palette.Warn),
+            _ => ("Authorization: -", Palette.Muted),
+        };
+        PackageText.Text = GameConstants.PackageName;
         HeadsetCompatText.Text = s.Headset == null ? "-" : s.HeadsetCompatibility?.Summary ?? (s.Headset.Supported ? "supported" : "NOT supported");
         HeadsetCompatText.Foreground = s.Headset == null ? Palette.Muted
             : s.HeadsetCompatibility?.Supported == false || !s.Headset.Supported ? Palette.Danger
@@ -517,8 +546,15 @@ public partial class MainWindow : Window
     public void Report(string title, bool ok, string message)
     {
         _lastResult = ok;
-        if (ok) _svc.Log.Success(message);
-        else _svc.Log.Error(message);
-        MessageBox.Show(this, message, title, MessageBoxButton.OK, ok ? MessageBoxImage.Information : MessageBoxImage.Error);
+        if (ok)
+        {
+            _svc.Log.Success(message);
+            MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        _svc.Log.Error(message);
+        // The last log lines usually explain the failure (adb output, apksigner error, ...).
+        var details = string.Join(Environment.NewLine, _log.TakeLast(60).Select(e => e.ToString()));
+        ErrorDialog.Show(this, title + " failed", message, details, _svc.Paths.Logs);
     }
 }

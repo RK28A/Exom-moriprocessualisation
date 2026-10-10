@@ -8,6 +8,7 @@
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
     <!-- ===================== Header ===================== -->
@@ -66,6 +67,7 @@
                         ToolTip="Headset used for backup, patch and install"/>
               <TextBlock x:Name="HeadsetText" Style="{StaticResource Big}" Text="..."/>
               <TextBlock x:Name="QuestText" Style="{StaticResource Value}" Foreground="{StaticResource Muted}" Text="..."/>
+              <TextBlock x:Name="AuthText" Style="{StaticResource Value}" Text="Authorization: ..."/>
               <Border Style="{StaticResource Chip}">
                 <TextBlock x:Name="HeadsetCompatText" Text="-" Foreground="{StaticResource Muted}" FontSize="12"/>
               </Border>
@@ -78,15 +80,17 @@
               <TextBlock x:Name="GameText" Style="{StaticResource Big}" Text="..."/>
               <Grid Margin="0,6,0,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-                <TextBlock Style="{StaticResource Label}" Text="Version"/>
-                <TextBlock Grid.Column="1" Style="{StaticResource Value}" x:Name="VersionText" Text="..."/>
-                <TextBlock Grid.Row="1" Style="{StaticResource Label}" Text="Version Code"/>
-                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" x:Name="VersionCodeText" Text="..."/>
-                <TextBlock Grid.Row="2" Style="{StaticResource Label}" Text="Installation"/>
-                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" x:Name="InstallText" Text="..."/>
-                <TextBlock Grid.Row="3" Style="{StaticResource Label}" Text="Loader"/>
-                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" x:Name="LoaderText" Text="..."/>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                <TextBlock Style="{StaticResource Label}" Text="Package"/>
+                <TextBlock Grid.Column="1" Style="{StaticResource Value}" x:Name="PackageText" Text="com.mandegames.NightClubSimulater" FontSize="11"/>
+                <TextBlock Grid.Row="1" Style="{StaticResource Label}" Text="Version"/>
+                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" x:Name="VersionText" Text="..."/>
+                <TextBlock Grid.Row="2" Style="{StaticResource Label}" Text="Version Code"/>
+                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" x:Name="VersionCodeText" Text="..."/>
+                <TextBlock Grid.Row="3" Style="{StaticResource Label}" Text="Installation"/>
+                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" x:Name="InstallText" Text="..."/>
+                <TextBlock Grid.Row="4" Style="{StaticResource Label}" Text="Loader"/>
+                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" x:Name="LoaderText" Text="..."/>
               </Grid>
             </StackPanel>
           </Border>
@@ -147,32 +151,33 @@
           <UniformGrid Columns="3">
             <Button Style="{StaticResource Primary}" Click="PatchInstall_Click" ToolTip="Choose headset, patch, sign, install">
               <StackPanel>
-                <TextBlock Text="PATCH + INSTALL" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
+                <TextBlock Text="Patch + Install" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                 <TextBlock Text="recommended" FontSize="11" Opacity="0.8" HorizontalAlignment="Center"/>
               </StackPanel>
             </Button>
             <Button Style="{StaticResource Primary}" Click="Patch_Click" Background="#3A2560" ToolTip="Build the patched APK only">
               <StackPanel>
-                <TextBlock Text="PATCH GAME" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
+                <TextBlock Text="Patch Game" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                 <TextBlock Text="build APK only" FontSize="11" Opacity="0.8" HorizontalAlignment="Center"/>
               </StackPanel>
             </Button>
             <Button Style="{StaticResource Recovery}" Click="Restore_Click" Margin="0,0,0,8" ToolTip="Reinstall the clean original game">
               <StackPanel>
-                <TextBlock Text="RESTORE ORIGINAL" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
+                <TextBlock Text="Restore Original" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                 <TextBlock Text="safest recovery" FontSize="11" Opacity="0.8" HorizontalAlignment="Center"/>
               </StackPanel>
             </Button>
           </UniformGrid>
           <WrapPanel Margin="0,2,0,6">
+            <Button Content="Detect / Refresh" Click="Refresh_Click" ToolTip="Re-detect ADB, headset, game and backup"/>
+            <Button Content="Backup Original" Click="Backup_Click"/>
             <Button Content="Unpatch" Click="Unpatch_Click"/>
-            <Button Content="Start in Safe Mode" Click="SafeMode_Click"/>
-            <Button Content="Backup original" Click="Backup_Click"/>
+            <Button Content="Start Safe Mode" Click="SafeMode_Click"/>
             <Button Content="Diagnose" Click="Diagnose_Click"/>
-            <Button Content="Logcat" Click="Logcat_Click"/>
-            <Button Content="Logs folder" Click="OpenLogs_Click"/>
+            <Button Content="Open Logs" Click="OpenLogs_Click"/>
+            <Button Content="Open Logcat" Click="Logcat_Click"/>
             <Button Content="Advanced" Click="Advanced_Click"/>
-            <Button Style="{StaticResource Danger}" Content="Emergency restore" Click="Emergency_Click"/>
+            <Button Style="{StaticResource Danger}" Content="Emergency Restore" Click="Emergency_Click"/>
           </WrapPanel>
           <CheckBox x:Name="LaunchAfterInstall" Content="Launch the game after install" IsChecked="True" Margin="2,0,0,12"/>
         </StackPanel>
@@ -256,5 +261,15 @@
         </Border>
       </Grid>
     </Grid>
+
+    <!-- ===================== Status bar ===================== -->
+    <Border Grid.Row="3" Margin="0,12,0,0" Padding="12,7" CornerRadius="8" Background="{StaticResource Panel}"
+            BorderBrush="{StaticResource Border}" BorderThickness="1">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Right" x:Name="StatusRight" Foreground="{StaticResource Muted}"/>
+        <TextBlock Text="Status:" Foreground="{StaticResource Muted}" Margin="0,0,8,0"/>
+        <TextBlock x:Name="StatusText" Text="Starting..." Foreground="{StaticResource Fg}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+      </DockPanel>
+    </Border>
   </Grid>
 </Window>

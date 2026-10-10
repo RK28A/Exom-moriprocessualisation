@@ -11,4 +11,4 @@ The patcher looks here first, then in the Android SDK (`ANDROID_HOME`, `ANDROID_
 | `jdk/` (optional) | a JDK 17+ (`jdk/bin/java.exe`, `keytool.exe`) | any OpenJDK build; otherwise `JAVA_HOME`/`PATH` is used |
 | `apktool/` (optional, FULL PATCH later) | `apktool.jar` | https://apktool.org |
 
-Run `NightClubPatcher.exe --tools` to see what was found.
+Run `NightClubPatcher.Cli.exe --tools` to see what was found.
