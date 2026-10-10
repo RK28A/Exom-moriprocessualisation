@@ -46,6 +46,7 @@ struct LoaderState {
     std::string selfPath;
     std::string gameVersion = "unknown";
     std::string unityVersion = "unknown";
+    ncs::DeviceInfo device;
     bool safeMode = false;
     ncs::LoaderConfig config;
     ncs::PluginManager plugins;
@@ -53,8 +54,13 @@ struct LoaderState {
     std::vector<std::string> modNames;
 };
 
-LoaderState g;
-NCSHostApi g_host{};
+// Heap-allocated on first use instead of a global object: the loader constructor can run before
+// this library's C++ static initializers, and the worker thread must never race a constructor.
+LoaderState& G() {
+    static LoaderState* state = new LoaderState();  // thread-safe, never destroyed
+    return *state;
+}
+NCSHostApi g_host{};  // POD: zero-initialized at load time, no dynamic initializer
 std::atomic<bool> g_started{false};
 
 void Stage(int n, const char* what) { NCS_LOGI("[NCS] STAGE %02d %s", n, what); }
@@ -113,12 +119,12 @@ void HostLog(int level, const char* modId, const char* message) {
                     message ? message : "");
 }
 int HostIl2CppReady() { return IL::IsReady() ? 1 : 0; }
-int HostModCount() { return static_cast<int>(g.modNames.size()); }
-const char* HostModName(int i) { return i >= 0 && i < static_cast<int>(g.modNames.size()) ? g.modNames[i].c_str() : ""; }
+int HostModCount() { return static_cast<int>(G().modNames.size()); }
+const char* HostModName(int i) { return i >= 0 && i < static_cast<int>(G().modNames.size()) ? G().modNames[i].c_str() : ""; }
 void* HostResolve(const char* name) { return IL::ResolveExport(name); }
-int HostAssemblyCount() { return static_cast<int>(g.assemblyNames.size()); }
+int HostAssemblyCount() { return static_cast<int>(G().assemblyNames.size()); }
 const char* HostAssemblyName(int i) {
-    return i >= 0 && i < static_cast<int>(g.assemblyNames.size()) ? g.assemblyNames[i].c_str() : "";
+    return i >= 0 && i < static_cast<int>(G().assemblyNames.size()) ? G().assemblyNames[i].c_str() : "";
 }
 NCSImage* HostFindImage(const char* n) { return const_cast<Il2CppImage*>(IL::FindAssembly(n)); }
 NCSClass* HostFindClass(const char* a, const char* ns, const char* n) { return IL::FindClass(a, ns, n); }
@@ -152,11 +158,11 @@ void BuildHostApi() {
     g_host.structSize = sizeof(NCSHostApi);
     g_host.apiVersion = NCS_LOADER_API;
     g_host.loaderVersion = ncs::kLoaderVersion;
-    g_host.packageName = g.package.c_str();
-    g_host.gameVersion = g.gameVersion.c_str();
-    g_host.unityVersion = g.unityVersion.c_str();
-    g_host.modsRoot = g.modsRoot.c_str();
-    g_host.safeMode = g.safeMode ? 1 : 0;
+    g_host.packageName = G().package.c_str();
+    g_host.gameVersion = G().gameVersion.c_str();
+    g_host.unityVersion = G().unityVersion.c_str();
+    g_host.modsRoot = G().modsRoot.c_str();
+    g_host.safeMode = G().safeMode ? 1 : 0;
     g_host.log = HostLog;
     g_host.isIl2CppReady = HostIl2CppReady;
     g_host.getLoadedModCount = HostModCount;
@@ -177,6 +183,9 @@ void BuildHostApi() {
     g_host.setStaticField = HostSetStatic;
     g_host.unbox = HostUnbox;
     g_host.attachCurrentThread = HostAttach;
+    g_host.deviceName = G().device.displayName.c_str();
+    g_host.deviceCodename = G().device.codename.c_str();
+    g_host.deviceModel = G().device.model.c_str();
 }
 
 // ---------------------------------------------------------------------------- mod discovery
@@ -185,7 +194,7 @@ std::vector<ncs::ModCandidate> DiscoverMods() {
     std::vector<ncs::ModCandidate> out;
 
     // 1) Mods embedded in the patched APK (lib/arm64-v8a/libncsmod_*.so).
-    const std::string& self = g.selfPath;
+    const std::string& self = G().selfPath;
     size_t bang = self.find("!/");
     if (bang != std::string::npos) {
         // Loaded directly from the APK (extractNativeLibs=false): the linker resolves sonames itself.
@@ -197,12 +206,12 @@ std::vector<ncs::ModCandidate> DiscoverMods() {
 
     // 2) External mods from NightClubMods/Mods. Shared storage is mounted noexec, so each file is
     //    copied into the app's private directory before dlopen.
-    if (!g.modsRoot.empty()) {
-        std::string ext = g.modsRoot + "/Mods";
+    if (!G().modsRoot.empty()) {
+        std::string ext = G().modsRoot + "/Mods";
         auto files = ncs::ListModFilesInDir(ext);
         std::string priv = ncs::AppDataDir();
 #if defined(NCS_HOST_TEST)
-        if (priv.empty()) priv = g.modsRoot + "/Cache";
+        if (priv.empty()) priv = G().modsRoot + "/Cache";
 #endif
         if (!files.empty() && priv.empty()) NCS_LOGW("[NCS] App data dir not writable; external mods skipped (embed them in the APK).");
         for (const auto& name : files) {
@@ -231,27 +240,32 @@ std::vector<ncs::ModCandidate> DiscoverMods() {
 void* WorkerMain(void*) {
     Stage(2, "Worker thread");
 
-    g.package = ncs::CurrentPackageName();
-    if (g.package != ncs::kTargetPackage) {
-        NCS_LOGE("[NCS] Package '%s' is not %s - loader stays idle", g.package.c_str(), ncs::kTargetPackage);
+    G().package = ncs::CurrentPackageName();
+    if (G().package != ncs::kTargetPackage) {
+        NCS_LOGE("[NCS] Package '%s' is not %s - loader stays idle", G().package.c_str(), ncs::kTargetPackage);
         return nullptr;
     }
-    NCS_LOGI("[NCS] Package verified: %s", g.package.c_str());
-    g.selfPath = ncs::SelfLibraryPath();
-    NCS_LOGI("[NCS] Loader path: %s", g.selfPath.c_str());
+    NCS_LOGI("[NCS] Package verified: %s", G().package.c_str());
+    G().device = ncs::DetectDevice();
+    NCS_LOGI("[NCS] Device: %s (%s / %s), Android %s (SDK %s)", G().device.displayName.c_str(), G().device.model.c_str(),
+             G().device.codename.c_str(), G().device.androidRelease.c_str(), G().device.sdk.c_str());
+    if (!G().device.known) NCS_LOGW("[NCS] Unrecognised headset - continuing (all Quests share the arm64 build)");
+    else if (!G().device.supported) NCS_LOGW("[NCS] %s is not a supported headset", G().device.displayName.c_str());
+    G().selfPath = ncs::SelfLibraryPath();
+    NCS_LOGI("[NCS] Loader path: %s", G().selfPath.c_str());
 
-    g.modsRoot = ncs::ResolveModsRoot(g.package);
-    if (g.modsRoot.empty()) {
+    G().modsRoot = ncs::ResolveModsRoot(G().package);
+    if (G().modsRoot.empty()) {
         NCS_LOGW("[NCS] No writable NightClubMods folder (storage permission?) - file logging and external mods disabled");
     } else {
-        g.config = ncs::LoadConfig(g.modsRoot);
-        ncs::log::SetFileEnabled(g.config.logging);
-        if (g.config.logging && ncs::log::OpenFile(g.modsRoot + "/Logs/latest.log"))
+        G().config = ncs::LoadConfig(G().modsRoot);
+        ncs::log::SetFileEnabled(G().config.logging);
+        if (G().config.logging && ncs::log::OpenFile(G().modsRoot + "/Logs/latest.log"))
             NCS_LOGI("[NCS] Log file: %s", ncs::log::FilePath().c_str());
-        NCS_LOGI("[NCS] Mods root: %s", g.modsRoot.c_str());
+        NCS_LOGI("[NCS] Mods root: %s", G().modsRoot.c_str());
     }
-    g.safeMode = g.config.safeMode || ncs::SafeModeFlagPresent(g.modsRoot);
-    if (g.safeMode) NCS_LOGW("[NCS] SAFE MODE: no third-party mods will be loaded");
+    G().safeMode = G().config.safeMode || ncs::SafeModeFlagPresent(G().modsRoot);
+    if (G().safeMode) NCS_LOGW("[NCS] SAFE MODE: no third-party mods will be loaded");
 
     if (!WaitFor([] { return LoadedLibrary("libunity.so") != nullptr; }, 120s, 50ms, "libunity.so")) return nullptr;
     Stage(3, "libunity detected");
@@ -278,18 +292,18 @@ void* WorkerMain(void*) {
     Stage(6, "Runtime initialized");
     NCS_LOGI("[NCS] IL2CPP initialized");
 
-    g.assemblyNames = IL::ListAssemblies();
-    NCS_LOGI("[NCS] %zu assemblies:", g.assemblyNames.size());
-    for (const auto& a : g.assemblyNames) {
+    G().assemblyNames = IL::ListAssemblies();
+    NCS_LOGI("[NCS] %zu assemblies:", G().assemblyNames.size());
+    for (const auto& a : G().assemblyNames) {
         size_t classes = IL::ClassCount(IL::FindAssembly(a.c_str()));
         NCS_LOGI("[NCS]   %s (%zu classes)", a.c_str(), classes);
     }
 
     std::string uv = NCS::Unity::GetUnityVersion();
     std::string gv = NCS::Unity::GetApplicationVersion();
-    if (!uv.empty()) g.unityVersion = uv;
-    if (!gv.empty()) g.gameVersion = gv;
-    NCS_LOGI("[NCS] Unity %s, game version %s", g.unityVersion.c_str(), g.gameVersion.c_str());
+    if (!uv.empty()) G().unityVersion = uv;
+    if (!gv.empty()) G().gameVersion = gv;
+    NCS_LOGI("[NCS] Unity %s, game version %s", G().unityVersion.c_str(), G().gameVersion.c_str());
 
     // FIFTH TEST: find a known class without changing anything.
     if (IL::FindClass("UnityEngine.CoreModule", "UnityEngine", "Application"))
@@ -298,20 +312,20 @@ void* WorkerMain(void*) {
         NCS_LOGW("[NCS] UnityEngine.Application not found");
 
     BuildHostApi();
-    g.plugins.SetDisabledIds(g.config.disabledMods);
+    G().plugins.SetDisabledIds(G().config.disabledMods);
     Stage(7, "Plugin manager initialized");
 
-    if (g.safeMode) {
+    if (G().safeMode) {
         NCS_LOGW("[NCS] Safe mode active - skipping mods");
     } else {
         NCS_LOGI("[NCS] Loading mods");
-        g.plugins.LoadAll(DiscoverMods(), &g_host);
-        for (const auto& m : g.plugins.Mods()) g.modNames.push_back(m.displayName);
+        G().plugins.LoadAll(DiscoverMods(), &g_host);
+        for (const auto& m : G().plugins.Mods()) G().modNames.push_back(m.displayName);
     }
     Stage(8, "Mods loaded");
     NCS_LOGI("[NCS] NCSLoader started successfully");
 
-    if (g.plugins.Mods().empty()) return nullptr;
+    if (G().plugins.Mods().empty()) return nullptr;
 
     // API 1 update tick: background thread, ~10 Hz. Not Unity's main thread.
     auto last = std::chrono::steady_clock::now();
@@ -320,7 +334,7 @@ void* WorkerMain(void*) {
         auto now = std::chrono::steady_clock::now();
         float dt = std::chrono::duration<float>(now - last).count();
         last = now;
-        g.plugins.UpdateAll(dt);
+        G().plugins.UpdateAll(dt);
     }
     return nullptr;
 }
@@ -331,6 +345,7 @@ extern "C" NCS_EXPORT const NCSHostApi* NCS_GetHostApi(void) { return IL::IsRead
 
 __attribute__((constructor)) static void loader_init() {
     if (g_started.exchange(true)) return;
+    G();  // construct the state before the worker thread exists
     Stage(1, "Loader constructor");
     NCS_LOGI("[NCSLoader] Hello from NightClubModKit");
     NCS_LOGI("[NCS] Loader %s (API %d)", ncs::kLoaderVersion, NCS_LOADER_API);

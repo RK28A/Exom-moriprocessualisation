@@ -1,18 +1,35 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    PRIMARY APPLICATION: the WPF GUI is published as NightClubPatcher.exe.
+    It only calls NightClubPatcher.Core (GUI -> Core); no patching logic lives here.
+  -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
-    <AssemblyName>NightClubPatcher.Gui</AssemblyName>
+    <AssemblyName>NightClubPatcher</AssemblyName>
     <RootNamespace>NightClubPatcher.Gui</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>NightClub Simulator Mod Patcher</Product>
+    <AssemblyTitle>NightClub Simulator Mod Patcher</AssemblyTitle>
   </PropertyGroup>
+
+  <!-- dotnet publish -c Release -r win-x64 : self-contained single-file NightClubPatcher.exe -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\NightClubPatcher.Core\NightClubPatcher.Core.csproj" />
   </ItemGroup>
-  <!-- Ship version profiles (and the native payload when it has been built) next to the executable. -->
+
+  <!-- Version profiles and the native payload are loose files next to the exe (never bundled). -->
   <ItemGroup>
-    <None Include="..\..\Versions\*.json" Link="Versions\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\Native\out\arm64-v8a\*.so" Link="Payload\arm64-v8a\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Versions\*.json" Link="Versions\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="..\..\Native\out\arm64-v8a\*.so" Link="Payload\arm64-v8a\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 </Project>

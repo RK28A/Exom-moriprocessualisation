@@ -13,6 +13,9 @@ public sealed class BuildRecord
     public List<string> SplitFiles { get; set; } = new();
     public DateTimeOffset CreatedAt { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>Headset selected when the build was made (the APK itself runs on every supported Quest).</summary>
+    public string? TargetDevice { get; set; }
 }
 
 public sealed class BuildManifest

@@ -65,6 +65,9 @@ public sealed class KitPaths
     /// <summary>Candidate locations of the compiled native loader (first existing wins).</summary>
     public IEnumerable<string> LoaderCandidates()
     {
+        // Release layout: libncsloader.so next to NightClubPatcher.exe.
+        yield return Path.Combine(Root, GameConstants.LoaderLibName);
+        yield return Path.Combine(AppContext.BaseDirectory, GameConstants.LoaderLibName);
         yield return Path.Combine(Payload, GameConstants.LoaderLibName);
         yield return Path.Combine(NativeOut, GameConstants.LoaderLibName);
         yield return Path.Combine(AppContext.BaseDirectory, "Payload", GameConstants.Abi, GameConstants.LoaderLibName);
@@ -75,6 +78,7 @@ public sealed class KitPaths
     /// <summary>Directories scanned for native mods (libncsmod_*.so) that can be embedded into the APK.</summary>
     public IEnumerable<string> ModPayloadDirs()
     {
+        yield return Root;
         yield return Payload;
         yield return NativeOut;
     }

@@ -12,7 +12,9 @@ internal static class Program
     private const string Help = """
         NightClub Simulator Mod Patcher (NightClubModKit) - target: com.mandegames.NightClubSimulater
 
-        Usage: NightClubPatcher.exe <command> [options]
+        Advanced command-line interface. The main application is the GUI: NightClubPatcher.exe
+
+        Usage: NightClubPatcher.Cli.exe <command> [options]
 
         Main commands
           --detect                     Detect Quest, game, version, backup and installation state
@@ -36,6 +38,14 @@ internal static class Program
           --elf-needed <so>            List DT_NEEDED of a shared library
           --elf-add-needed <in.so> <lib> <out.so>   Developer: add a DT_NEEDED entry
           --tools                      Show located external tools
+          --install-tools              Download missing adb / zipalign / apksigner / Java into Tools/
+          --check-adb                  Check adb (binary, version, server) and list devices
+          --restart-adb                Restart the adb server (fixes most "offline" devices)
+
+        Devices (Meta Quest 2 / Quest Pro / Quest 3 / Quest 3S)
+          --list-devices               List connected devices with headset model and compatibility
+          --device <serial>            Use this device (skips the device prompt; see --list-devices)
+                                       Without --device, --patch and --patch-install ask which headset to use.
 
         Options
           --allow-unverified           Allow patching builds whose fingerprints are not verified
@@ -64,12 +74,21 @@ internal static class Program
                 LogLevel.Warn => ConsoleColor.Yellow,
                 LogLevel.Success => ConsoleColor.Green,
                 LogLevel.Debug => ConsoleColor.DarkGray,
+                LogLevel.Step => ConsoleColor.Cyan,
                 _ => ConsoleColor.Gray,
             };
-            Console.WriteLine(msg);
+            Console.WriteLine(level == LogLevel.Step ? "==> " + msg : msg);
             Console.ResetColor();
         };
         IUserInteraction ui = args.Contains("--non-interactive") ? new NonInteractive(svc.Log) : new ConsoleInteraction();
+
+        var serial = Value(args, "--device");
+        if (args.Contains("--device"))
+        {
+            if (serial == null) { Console.WriteLine("Usage: --device <serial>  (see --list-devices)"); return 1; }
+            if (!svc.UseDevice(serial)) return 2;
+            svc.DeviceLockedByUser = true;
+        }
 
         try
         {
@@ -110,9 +129,35 @@ internal static class Program
                 return r.Outcome is Core.Backup.BackupOutcome.Created or Core.Backup.BackupOutcome.AlreadyExists ? 0 : 2;
             }
 
+            case "--install-tools":
+            {
+                var missing = svc.ToolSetup.Missing();
+                if (missing.Count == 0) { svc.Log.Success("All tools are already installed."); return 0; }
+                var ok = svc.EnsureToolsAsync(ui).GetAwaiter().GetResult();
+                return ok ? 0 : 2;
+            }
+
+            case "--check-adb":
+            {
+                var h = svc.Adb.CheckHealth();
+                Console.WriteLine($"adb binary   : {(h.Found ? h.Path : "NOT FOUND (run --install-tools)")}");
+                Console.WriteLine($"adb version  : {h.Version ?? "-"}");
+                Console.WriteLine($"adb server   : {(h.ServerRunning ? "running" : "NOT running")}");
+                if (h.Error != null) Console.WriteLine($"problem      : {h.Error}");
+                if (!h.Ok) return 2;
+                Console.WriteLine();
+                return ListDevices(svc);
+            }
+
+            case "--restart-adb":
+                return svc.Adb.RestartServer() ? 0 : 2;
+
+            case "--list-devices":
+                return ListDevices(svc);
+
             case "--patch":
             {
-                var r = svc.Patch(Options(args));
+                var r = svc.Patch(Options(args), ui);
                 Report(svc, r.Ok, r.Message + (r.OutputApk != null ? Environment.NewLine + r.OutputApk : ""));
                 return r.Ok ? 0 : 2;
             }
@@ -131,7 +176,7 @@ internal static class Program
                 Report(svc, p.Ok, p.Message);
                 if (i != null) Report(svc, i.Ok, i.Message);
                 if (i?.Ok == true)
-                    svc.Log.Info("Check the loader with: NightClubPatcher.exe --logcat   (expect '[NCSLoader] Hello from NightClubModKit')");
+                    svc.Log.Info("Check the loader with: NightClubPatcher.Cli.exe --logcat   (expect '[NCSLoader] Hello from NightClubModKit')");
                 return p.Ok && i?.Ok == true ? 0 : 2;
             }
 
@@ -244,6 +289,26 @@ internal static class Program
         }
     }
 
+    private static int ListDevices(ModKitService svc)
+    {
+        var devices = svc.ListDevices();
+        if (devices.Count == 0)
+        {
+            Console.WriteLine(svc.Adb.Available ? "No device connected." : "adb not found.");
+            return 2;
+        }
+        string? manifest = null;
+        var b = svc.Backups.Latest();
+        if (b != null) { try { manifest = svc.Analyze(b.ApkPath).Manifest.SupportedDevices; } catch { /* ignore */ } }
+        foreach (var d in devices)
+        {
+            var c = Core.Adb.QuestDevices.Check(d.Headset, manifest);
+            Console.WriteLine($"{d.Serial,-28} {d.State,-13} {d.Headset.DisplayName,-24} {(d.Ready ? c.Summary : "")}");
+            foreach (var w in c.Warnings) Console.WriteLine("    ! " + w);
+        }
+        return 0;
+    }
+
     private static void Report(ModKitService svc, bool ok, string message)
     {
         if (ok) svc.Log.Success(message);
@@ -257,6 +322,10 @@ internal static class Program
         Console.WriteLine("      NightClub Simulator Mod Patcher");
         Console.WriteLine(new string('-', 50));
         Console.WriteLine($"Quest:                 {s.DeviceText}");
+        if (s.Headset != null)
+            Console.WriteLine($"Headset:               {s.Headset.DisplayName} - {s.HeadsetCompatibility?.Summary ?? (s.Headset.Supported ? "supported" : "not supported")}, {s.AndroidVersion}");
+        if (s.Devices.Count > 1)
+            foreach (var d in s.Devices) Console.WriteLine($"  device:              {d.Label}");
         Console.WriteLine($"Game:                  {(s.Installed?.Installed == true ? "Detected" : "Not detected")}");
         Console.WriteLine($"Package:               {GameConstants.PackageName}");
         var a = s.BackupAnalysis;

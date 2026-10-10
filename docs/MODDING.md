@@ -49,6 +49,16 @@ Add a `mod.json` next to your sources for documentation / future tooling:
 
 The authoritative metadata is `NCSModInfo` returned by `NCSMod_GetInfo`.
 
+## Device information
+
+```cpp
+NCS::Game::GetDeviceName();      // "Meta Quest 3S" (loader >= 0.2.0, "unknown" before)
+NCS::Game::GetDeviceCodename();  // hollywood / seacliff / eureka / panther
+```
+
+These fields were appended to `NCSHostApi` without changing the API number; raw C users must
+check `NCS_HOST_HAS(api, deviceName)` first.
+
 ## Rules (API 1)
 
 * `NCSMod_Load` and `NCSMod_Update` run on the loader worker thread, attached to the IL2CPP
@@ -62,7 +72,7 @@ The authoritative metadata is `NCSModInfo` returned by `NCSMod_GetInfo`.
 ## Debugging
 
 ```
-NightClubPatcher.exe --logcat          # or GUI: OPEN LOGCAT, tick "NCS only"
+NightClubPatcher.Cli.exe --logcat          # or GUI: OPEN LOGCAT, tick "NCS only"
 adb shell cat /sdcard/NightClubMods/Logs/latest.log
 ```
 

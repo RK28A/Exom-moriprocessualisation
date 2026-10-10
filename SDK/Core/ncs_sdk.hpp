@@ -48,6 +48,9 @@ namespace Game {
 inline std::string GetVersion() { return Host() ? Host()->gameVersion : "unknown"; }
 inline std::string GetUnityVersion() { return Host() ? Host()->unityVersion : "unknown"; }
 inline bool IsSafeMode() { return Host() && Host()->safeMode; }
+/// "Meta Quest 3S", or "unknown" with loaders older than 0.2.0.
+inline std::string GetDeviceName() { return NCS_HOST_HAS(Host(), deviceName) ? Host()->deviceName : "unknown"; }
+inline std::string GetDeviceCodename() { return NCS_HOST_HAS(Host(), deviceCodename) ? Host()->deviceCodename : ""; }
 inline std::vector<std::string> GetLoadedMods() {
     std::vector<std::string> out;
     if (!Host()) return out;

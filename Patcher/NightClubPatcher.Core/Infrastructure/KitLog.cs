@@ -1,6 +1,6 @@
 namespace NightClubPatcher.Core.Infrastructure;
 
-public enum LogLevel { Debug, Info, Warn, Error, Success }
+public enum LogLevel { Debug, Info, Warn, Error, Success, Step }
 
 /// <summary>
 /// Thread-safe logger writing to Logs/patcher-YYYYMMDD.log and to any attached sink (console, GUI).
@@ -34,7 +34,8 @@ public sealed class KitLog
     public void Error(string msg) => Write(LogLevel.Error, msg);
     public void Success(string msg) => Write(LogLevel.Success, msg);
 
-    public void Step(string msg) => Write(LogLevel.Info, "==> " + msg);
+    /// <summary>Start of a workflow step; UIs show these as a progress list.</summary>
+    public void Step(string msg) => Write(LogLevel.Step, msg);
 
     public void Write(LogLevel level, string msg)
     {

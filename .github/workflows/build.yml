@@ -41,20 +41,35 @@ jobs:
         run: ./Native/Tests/run_host_test.sh
 
   windows:
-    name: Patcher (Windows, WPF + CLI)
+    name: Windows release (GUI NightClubPatcher.exe + CLI)
     runs-on: windows-latest
+    needs: native-android
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - run: dotnet build NightClubModKit.sln -c Release
-      - run: dotnet test Patcher/NightClubPatcher.Tests -c Release --no-build
-      - name: Publish
-        run: |
-          dotnet publish Patcher/NightClubPatcher.Gui -c Release -r win-x64 --self-contained false -o publish
-          dotnet publish Patcher/NightClubPatcher.Cli -c Release -r win-x64 --self-contained false -o publish
+      - name: Get the native loader built by the NDK job
+        uses: actions/download-artifact@v4
+        with:
+          name: NightClubModKit-native-arm64-v8a
+          path: Native/out/arm64-v8a
+      - name: Build-Windows.ps1 (build, test, publish, assemble Release, smoke-test GUI + CLI)
+        shell: pwsh
+        run: ./Build-Windows.ps1 -SmokeTest
+      - name: Upload crash logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-crash-logs
+          path: Release/Logs
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
-          name: NightClubPatcher-win-x64
-          path: publish
+          name: NightClubPatcher-Release-win-x64
+          path: |
+            Release
+            !Release/Backups
+            !Release/Builds
+            !Release/Keys
+            !Release/Cache

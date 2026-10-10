@@ -3,9 +3,42 @@ using NightClubPatcher.Core.Infrastructure;
 
 namespace NightClubPatcher.Core.Adb;
 
+public sealed record AdbHealth(bool Found, string? Path, string? Version, bool ServerRunning, string? Error)
+{
+    public bool Ok => Found && ServerRunning;
+}
+
 public enum DeviceState { NoAdb, NoDevice, Unauthorized, Offline, Connected, MultipleDevices }
 
-public sealed record AdbDevice(string Serial, string State, string Description);
+/// <summary>One line of "adb devices -l".</summary>
+public sealed record AdbDevice(string Serial, string State, string Description)
+{
+    private string? Field(string key) => Description.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        .FirstOrDefault(p => p.StartsWith(key + ":", StringComparison.Ordinal))?[(key.Length + 1)..];
+
+    public string? Model => Field("model")?.Replace('_', ' ');
+    public string? Codename => Field("device");
+    public string? Product => Field("product");
+    public bool Ready => State == "device";
+    public bool IsWireless => Serial.Contains(':') || Serial.Contains("._adb-tls-connect.");
+
+    public QuestModelInfo Headset => QuestDevices.Identify(Model, Codename);
+
+    public string Label
+    {
+        get
+        {
+            var state = State switch
+            {
+                "device" => "",
+                "unauthorized" => "  [UNAUTHORIZED - accept USB debugging in the headset]",
+                _ => $"  [{State}]",
+            };
+            var link = IsWireless ? "Wi-Fi" : "USB";
+            return $"{Headset.DisplayName}  ({Serial}, {link}){state}";
+        }
+    }
+}
 
 public sealed class AdbException : Exception
 {
@@ -16,8 +49,11 @@ public sealed class AdbException : Exception
 public sealed class AdbClient
 {
     private readonly KitLog _log;
-    public string? AdbPath { get; }
+    public string? AdbPath { get; set; }
     public string? Serial { get; set; }
+
+    /// <summary>Device chosen by the user (GUI selector, --device, or the pre-patch prompt).</summary>
+    public string? PreferredSerial { get; set; }
 
     public AdbClient(string? adbPath, KitLog log)
     {
@@ -57,11 +93,35 @@ public sealed class AdbClient
         return r.Ok ? r.StdOut.Split('\n').FirstOrDefault()?.Trim() ?? "" : "";
     }
 
-    public List<AdbDevice> Devices()
+    /// <summary>
+    /// ADB health: binary found, runnable, version, and adb server started. Device state is
+    /// reported separately by <see cref="DetectDevice"/>.
+    /// </summary>
+    public AdbHealth CheckHealth()
     {
-        var r = RunTimed(null, "devices", "-l");
+        if (AdbPath == null) return new AdbHealth(false, null, null, false, "adb not found");
+        var v = RunTimed(TimeSpan.FromSeconds(15), "version");
+        if (!v.Ok) return new AdbHealth(true, AdbPath, null, false, "adb cannot run: " + v.Combined);
+        var version = v.StdOut.Split('\n').Select(l => l.Trim())
+            .FirstOrDefault(l => l.StartsWith("Version ", StringComparison.Ordinal))?["Version ".Length..]
+            ?? v.StdOut.Split('\n').FirstOrDefault()?.Trim();
+        var server = RunTimed(TimeSpan.FromSeconds(30), "start-server");
+        return new AdbHealth(true, AdbPath, version, server.Ok, server.Ok ? null : "adb server failed to start: " + server.Combined);
+    }
+
+    /// <summary>kill-server + start-server: fixes most "offline" / stuck connections.</summary>
+    public bool RestartServer()
+    {
+        RunTimed(TimeSpan.FromSeconds(15), "kill-server");
+        return RunTimed(TimeSpan.FromSeconds(30), "start-server").Ok;
+    }
+
+    public List<AdbDevice> Devices() => ParseDevices(RunTimed(null, "devices", "-l").StdOut);
+
+    public static List<AdbDevice> ParseDevices(string output)
+    {
         var list = new List<AdbDevice>();
-        foreach (var raw in r.StdOut.Split('\n'))
+        foreach (var raw in output.Split('\n'))
         {
             var line = raw.Trim();
             if (line.Length == 0 || line.StartsWith("List of devices") || line.StartsWith("*")) continue;
@@ -72,7 +132,10 @@ public sealed class AdbClient
         return list;
     }
 
-    /// <summary>Selects the device to use and reports its state.</summary>
+    /// <summary>
+    /// Selects the device to use and reports its state. The user's choice (PreferredSerial) wins;
+    /// with several ready devices and no choice, returns MultipleDevices so callers ask.
+    /// </summary>
     public DeviceState DetectDevice(out AdbDevice? device)
     {
         device = null;
@@ -81,14 +144,21 @@ public sealed class AdbClient
         var devices = Devices();
         if (devices.Count == 0) return DeviceState.NoDevice;
 
-        var ready = devices.Where(d => d.State == "device").ToList();
-        if (ready.Count > 1)
+        if (PreferredSerial != null)
         {
-            // Prefer a Quest when several devices are attached.
-            device = ready.FirstOrDefault(d => d.Description.Contains("Quest", StringComparison.OrdinalIgnoreCase)) ?? ready[0];
-            Serial = device.Serial;
-            return DeviceState.Connected;
+            var chosen = devices.FirstOrDefault(d => d.Serial == PreferredSerial);
+            if (chosen != null)
+            {
+                device = chosen;
+                if (chosen.Ready) { Serial = chosen.Serial; return DeviceState.Connected; }
+                return chosen.State == "unauthorized" ? DeviceState.Unauthorized : DeviceState.Offline;
+            }
+            _log.Warn($"Selected device {PreferredSerial} is no longer connected.");
+            PreferredSerial = null;
         }
+
+        var ready = devices.Where(d => d.Ready).ToList();
+        if (ready.Count > 1) return DeviceState.MultipleDevices;
         if (ready.Count == 1)
         {
             device = ready[0];
@@ -100,10 +170,13 @@ public sealed class AdbClient
         return device.State switch
         {
             "unauthorized" => DeviceState.Unauthorized,
-            "offline" => DeviceState.Offline,
             _ => DeviceState.Offline,
         };
     }
+
+    /// <summary>Full identification through getprop (works for Wi-Fi devices too).</summary>
+    public QuestModelInfo IdentifyHeadset() =>
+        QuestDevices.Identify(GetProp("ro.product.model"), GetProp("ro.product.device"), GetProp("ro.product.manufacturer"));
 
     public string GetProp(string name) => Shell($"getprop {name}").StdOut.Trim();
 

@@ -29,3 +29,7 @@ Tools/**/*.exe
 Tools/**/*.dll
 Tools/**/*.jar
 Tools/jdk/
+
+# Windows release output (Build-Windows.ps1)
+Release/
+artifacts/
