@@ -1,7 +1,11 @@
 # Roadmap / phase status
 
-Legend: ✅ implemented and covered by automated tests · 🟡 implemented, needs on-device verification ·
+Legend: ✅ implemented and covered by automated tests · 🟡 implemented, **needs on-device verification** ·
 ⏳ planned
+
+> Nothing in NCMK has run on a headset yet. "✅ host" means proven against the fake IL2CPP / fake
+> game on Linux only; every such item **also needs on-device verification** before it can be
+> called done.
 
 | # | Phase | Status | Where |
 |---|---|---|---|
@@ -16,42 +20,62 @@ Legend: ✅ implemented and covered by automated tests · 🟡 implemented, need
 | 8 | Immutable backup | ✅ | read-only files, `original.sha256`, `backup.json`, never overwritten |
 | 9 | Detect Unity / ARM64 / IL2CPP / XR | ✅ | `UnityDetector` (UnityFS header, libunity strings), `Il2CppDetector` (metadata magic), ELF machine |
 | 10 | Extract libmain.so | ✅ | `PatchEngine.BuildUnsignedPatchedApk` |
-| 11 | Build libncsloader.so | 🟡 | `Native/` (NDK build in CI; host build tested) |
+| 11 | Build libncmkloader.so | 🟡 | `Native/` (NDK build in CI; host build tested) |
 | 12 | Patch libmain.so DT_NEEDED | ✅ | `Elf/ElfNeededPatcher` (tested on lld AArch64 fixture + glibc runtime) |
-| 13 | Inject libncsloader.so | ✅ | stored + page aligned |
+| 13 | Inject libncmkloader.so | ✅ | stored + page aligned |
 | 14 | Rebuild APK | ✅ | `Apk/ApkRewriter` (raw copy, no resource decoding) |
 | 15 | zipalign | 🟡 | `ApkSigningService.Zipalign` |
 | 16 | Sign APK | 🟡 | `apksigner` v1+v2+v3, permanent keystore (keystore generation tested) |
 | 17 | Install patched APK | 🟡 | `InstallService` (signature-safe) |
 | 18 | Launch game | 🟡 | `cmd package resolve-activity` + `am start` |
-| 19 | Verify `[NCSLoader] Hello…` | ✅ host / 🟡 Quest | `Native/Tests/run_host_test.sh` |
+| 19 | Verify `[NCMK] Hello…` | ✅ host / 🟡 Quest | `Native/Tests/run_host_test.sh` |
 | 20 | RESTORE ORIGINAL | 🟡 | `Recovery/RestoreService` |
 | 21 | EMERGENCY RESTORE | 🟡 | works from `original.apk` alone (lookup tested) |
 | 22 | UNPATCH | 🟡 | `PatchEngine.Unpatch` |
 | 23 | Detect libil2cpp at runtime | ✅ host | `dlopen(RTLD_NOLOAD)` + `dl_iterate_phdr` |
 | 24 | Resolve IL2CPP API | ✅ host | `Native/Il2Cpp/il2cpp_api.cpp` (dlsym only) |
 | 25 | List assemblies | ✅ host | |
-| 26 | NCS SDK | ✅ | `SDK/` |
-| 27 | Plugin manager | ✅ host | `Native/Plugins/` (API version check, config disable, embedded + external) |
-| 28 | HelloWorld mod | ✅ host | `Mods/HelloWorld` |
-| 29 | Debug Overlay | ✅ host (log based) | `Mods/DebugOverlay` – in-headset rendering needs API 2 hooks |
+| 26 | NCMK SDK (C ABI + header-only C++) | ✅ host / 🟡 | `SDK/` |
+| 27 | Plugin manager | ✅ host / 🟡 | `Native/Plugins/` (API version check, config disable, embedded + external, API 1 + legacy `NCSMod_*` mods) |
+| 28 | HelloWorld mod | ✅ host / 🟡 | `Mods/HelloWorld` |
+| 29 | Debug Overlay (in-headset NCMK::UI panel, log fallback) | ✅ host (log fallback only) / 🟡 panel | `Mods/DebugOverlay` |
 | 30 | Diagnostics | 🟡 | `DiagnosticService`, OPEN LOGCAT |
 | 31 | APK Explorer | 🟡 | Advanced → APK Explorer (extract / replace-as-new-signed-copy / export / hash / info) |
 | 32 | IL2CPP Inspector | ⏳ | Cpp2IL offline step → `Cache/<ver>/{assemblies,classes,methods,fields,strings}.json` |
 | 33 | SDK generation | ⏳ | `GeneratedSDK/{Assembly-CSharp.hpp, UnityEngine.hpp, Il2CppTypes.hpp, metadata.json}` from the cache |
-| 34 | Asset override system | ⏳ | `NightClubMods/Overrides/…` (folders already created by the loader) |
-| 35 | Update compatibility system | ✅ | `ProfileStore.Evaluate` + update warnings in Detect |
+| 34 | Asset override system | ⏳ | `NCMKMods/Overrides/…` (folders already created by the loader) |
+| 35 | Update compatibility system | ✅ | `ProfileStore.Evaluate` + update warnings in Detect (+ metadata version 31) |
+
+## NCMK API 2 (all items: needs on-device verification)
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| 36 | Rename to NCMK (libncmkloader.so, libncmkmod_*.so, tag NCMK, NCMKMods, NCMK.keystore, assets/NCMK marker) | ✅ / 🟡 | everywhere |
+| 37 | Detect + cleanly unpatch APKs patched with the old names (libncsloader.so, libncsmod_*.so) | ✅ / 🟡 | `GameConstants.Legacy*`, `PatchEngine.BuildUnsignedUnpatchedApk` |
+| 38 | Keystore migration NightClubModKit.keystore → NCMK.keystore (same key, never regenerated) | ✅ / 🟡 | `KeystoreManager.MigrateLegacyKeystore` |
+| 39 | Main-thread dispatcher (MethodInfo slot 0/1 swap, 3 targets, 5 s fallback, frameCount dedupe, restore on unload, never in Safe Mode) | ✅ host / 🟡 | `Native/Hooks/main_thread.cpp` |
+| 39a | — target 1 `UnitySynchronizationContext.ExecuteTasks` actually ticks on Unity 6000.2.2f1 | 🟡 | first thing to check on the Quest (STAGE 09 line) |
+| 39b | — Unity calls per-frame methods through `MethodInfo.methodPointer` (not a cached copy) | 🟡 | if not, STAGE 09 reports "no per-frame target worked" |
+| 40 | `NCMKMod_OnUpdate/OnLateUpdate/OnFixedUpdate/OnSceneLoaded`, `OnBackgroundTick` | ✅ host / 🟡 | `Native/Plugins/plugin_manager.cpp` |
+| 41 | Host API 2: isMainThread, runOnMainThread, findMethodBySignature, findNestedClass, typeOf, newObject, pin/unpin, getEnumValue | ✅ host / 🟡 | `Native/Loader/loader.cpp`, `Native/Il2Cpp/il2cpp_api.cpp` |
+| 42 | API 1 and NightClubModKit-era mods still load | ✅ host / 🟡 | `Native/Tests/legacy_mod.c` |
+| 43 | `NCMK::Unity` (GameObject, Transform, Camera, Time, Scene, value types) | 🟡 (compiles; fake has no scene graph) | `SDK/Unity/ncmk_unity.hpp` |
+| 44 | `NCMK::Input` on OVRInput (+ world pose via OVRCameraRig / Camera.main parent; HurricaneVR rig unknown) | 🟡 | `SDK/Input/ncmk_input.hpp` |
+| 45 | `NCMK::UI` (world-space Canvas, RectTransform, Image, Text, RectMask2D, CanvasGroup, Texture2D/Sprite, built-in font) | 🟡 | `SDK/UI/ncmk_ui.hpp` |
+| 46 | `NCMK::Config` (`<modsRoot>/Config/<modId>.cfg`) | ✅ host / 🟡 | `SDK/Config/ncmk_config.hpp` |
+| 47 | Mods root `/sdcard/Android/data/<pkg>/files/NCMKMods` (no storage permission) + patcher push of mods/config | ✅ unit / 🟡 | loader `ResolveModsRoot`, `Mods/DeviceModPusher`, `--push-mods` |
+| 48 | Entitlement failure reported by diagnostics (no bypass) | ✅ unit / 🟡 | `LogcatFilter.EntitlementFailures` |
+| 49 | Re-signed APK passes the game's Meta entitlement check | 🟡 unknown | if it fails, diagnostics say so; NCMK will not work around it |
 
 ## Next steps, in order
 
 1. **On-device first test.** Build with the NDK, `--patch-install --no-mods --launch`, confirm the
-   game runs and logcat shows `[NCSLoader] Hello from NightClubModKit`. Then pin fingerprints and set
-   `"verified": true` in `Versions/1.1.0-212.json`.
-2. Tests 2–6 from the spec (libil2cpp found → API ready → assemblies → class found → HelloWorld).
-   All of them are already logged by the loader; only confirmation on the headset is missing.
-3. **API 2 – Hooks module:** main-thread dispatcher via a name-resolved Unity player-loop entry,
-   unlocking `NCSMod_OnSceneLoaded/OnFixedUpdate/OnGUI` and scene-graph helpers
-   (`FindGameObject`, `GetMainCamera`, `GetComponent`, …). Then an in-headset Debug Overlay.
+   game runs and logcat shows `[NCMK] Hello from NCMK`. Check **Diagnose → Meta entitlement**. Then
+   pin fingerprints and set `"verified": true` in `Versions/1.1.0-212.json`.
+2. With mods: confirm the `STAGE 09` line (which per-frame target hooked) and that the
+   DebugOverlay panel is visible and follows the head. If no target works, collect the log and
+   the game's per-frame managed methods before adding a target.
+3. Verify `NCMK::Input` against the game's HurricaneVR rig (tracking space for `WorldPose`).
 4. Cpp2IL integration + IL2CPP cache + SDK generator (offsets only as a cache, never the only lookup).
 5. Unity Object Explorer (read-only first) and the development console.
 6. FULL PATCH (apktool, only when manifest/resources must change), asset overrides.
@@ -59,8 +83,12 @@ Legend: ✅ implemented and covered by automated tests · 🟡 implemented, need
 ## Known limitations
 
 - `/data/data/<pkg>` is not readable without root; it can be lost when Android requires uninstalling
-  because of a signature change. External data (`/sdcard/Android/data`, `obb`) is preserved.
-- Meta platform entitlement checks are tied to the account, not to the APK signature, but this has
-  to be confirmed for this title on the first on-device test.
+  because of a signature change. External data (`/sdcard/Android/data`, `obb`) is preserved by the
+  game-data backup. NCMKMods lives in external data, so uninstalling deletes it.
+- The game checks Meta entitlement (`MetaAccount.OnUseEntitlement`) and has a server-side ban
+  system. NCMK contains no bypass, spoofing or evasion for either; whether a re-signed APK passes
+  the entitlement check is unknown until tested, and diagnostics report a failure.
 - ZIP64 APKs (> 4 GB) are not supported by the rewriter.
-- API 1 `NCSMod_Update` runs on the loader thread (~10 Hz), not Unity's main thread.
+- `OnFixedUpdate` runs after the frame's Update with the number of physics steps Unity ran, not
+  interleaved with physics. `OnSceneLoaded` is polled every 10 frames.
+- `NCMKMod_Load` and `OnBackgroundTick` run on the loader worker thread, not Unity's main thread.

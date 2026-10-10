@@ -1,6 +1,13 @@
-# NightClubModKit
+# NCMK — NightClub Simulator Mod Kit
 
-Dedicated Windows patcher and native modding framework for **NightClub Simulator** on Meta Quest.
+Windows patcher and **general-purpose native modding API** for **NightClub Simulator** on Meta Quest.
+Any mod can be built on it: a stable C ABI (`NCMK_LOADER_API = 2`) with main-thread callbacks, and a
+header-only C++ SDK for Unity objects, Quest controllers, in-headset UI and per-mod config files
+([docs/MODDING.md](docs/MODDING.md)).
+
+> **Not yet tested on a headset.** The patcher, loader, main-thread dispatcher and SDK are covered by
+> unit tests and a host end-to-end test against a fake IL2CPP; every on-device item is marked
+> *needs on-device verification* in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 | | |
 |---|---|
@@ -21,25 +28,28 @@ Dedicated Windows patcher and native modding framework for **NightClub Simulator
 Quest ──adb pull──► Backups/…/original.apk   (immutable, read-only, SHA-256 + backup.json)
                          │  copy (never edited)
                          ▼
-        %TEMP%\NightClubModKit\<ts>\{input,unpacked,native,patched,output}
+        %TEMP%\NCMK\<ts>\{input,unpacked,native,patched,output}
                          │  FAST PATCH
-                         │   • libmain.so  +DT_NEEDED libncsloader.so   (ELF patch, no code change)
-                         │   • + lib/arm64-v8a/libncsloader.so          (stored, page-aligned)
-                         │   • + lib/arm64-v8a/libncsmod_*.so           (optional embedded mods)
-                         │   • + assets/NightClubModKit/patch.json      (marker)
+                         │   • libmain.so  +DT_NEEDED libncmkloader.so   (ELF patch, no code change)
+                         │   • + lib/arm64-v8a/libncmkloader.so          (stored, page-aligned)
+                         │   • + lib/arm64-v8a/libncmkmod_*.so           (optional embedded mods)
+                         │   • + assets/NCMK/patch.json      (marker)
                          │   • old signature stripped
                          ▼
-                 zipalign ─► apksigner (permanent NightClubModKit key)
+                 zipalign ─► apksigner (permanent NCMK key)
                          ▼
      Builds/1.1.0-212/patched-current.apk  (previous one rotated to patched-previous.apk)
                          ▼
                 adb install (signature-safe) ─► launch ─► logcat:
-                         [NCSLoader] Hello from NightClubModKit
+                         [NCMK] Hello from NCMK
 ```
 
 On the device the loader runs **before Unity**: it logs, starts a worker thread, waits for
 `libunity.so` then `libil2cpp.so`, resolves the IL2CPP API with `dlsym`, waits for the runtime,
-enumerates assemblies and loads mods. **No hooks, no game code changes.**
+enumerates assemblies and loads mods. **No inline hooks, no game code changes.** To call mods on
+Unity's main thread, the loader swaps the two function-pointer slots of one per-frame managed
+method's `MethodInfo` (resolved by name; restored on unload; never in Safe Mode) — see
+[Native/Hooks/README.md](Native/Hooks/README.md).
 
 ---
 
@@ -64,12 +74,12 @@ All supported headsets use the **same patched APK** (arm64-v8a). The headset mat
 * **Compatibility check.** The headset is matched against the game's
   `com.oculus.supportedDevices` manifest entry. If the developer does not list your headset you get
   a warning and must confirm; sideloading usually still works.
-* **Storage on newer Horizon OS (Quest 3 / 3S).** Shared storage is scoped: when
-  `/sdcard/NightClubMods` is not writable by the game, the loader automatically uses
-  `/sdcard/Android/data/com.mandegames.NightClubSimulater/files/NightClubMods` (Safe Mode flags are
-  written to both).
-* The loader logs the headset (`[NCS] Device: Meta Quest 3S (Quest 3S / panther), Android 14 (SDK 34)`)
-  and exposes it to mods (`NCS::Game::GetDeviceName()`), and `backup.json` / `build.json` record the
+* **Storage.** The game's manifest has no storage permission, so mods, configs and logs live in its
+  own external files folder,
+  `/sdcard/Android/data/com.mandegames.NightClubSimulater/files/NCMKMods`, on every headset. The
+  patcher pushes mods and config there (**Push mods + config**, `--push-mods`).
+* The loader logs the headset (`[NCMK] Device: Meta Quest 3S (Quest 3S / panther), Android 14 (SDK 34)`)
+  and exposes it to mods (`NCMK::Game::GetDeviceName()`), and `backup.json` / `build.json` record the
   source and target headset.
 
 ---
@@ -77,7 +87,7 @@ All supported headsets use the **same patched APK** (arm64-v8a). The headset mat
 ## Repository layout
 
 ```
-NightClubModKit.sln
+NCMK.sln
 Patcher/
   NightClubPatcher.Core/    all logic (shared by GUI + CLI)
     Adb/  Apk/  Android/  Elf/  Signing/  Backup/  Recovery/  Unity/  Il2Cpp/
@@ -85,12 +95,14 @@ Patcher/
   NightClubPatcher.Gui/     WPF app - MAIN APPLICATION -> NightClubPatcher.exe
   NightClubPatcher.Cli/     command line (advanced)    -> NightClubPatcher.Cli.exe
   NightClubPatcher.Tests/   xUnit tests (+ real AArch64 ELF fixtures)
-Native/                     libncsloader.so (C++17, Android NDK)
+Native/                     libncmkloader.so (C++17, Android NDK)
   Loader/ Il2Cpp/ Unity/ Logging/ Plugins/ Hooks/ Tests/
 SDK/                        headers for mod authors
-  Core/ncs_mod_api.h        stable C ABI (NCS_LOADER_API = 1)
-  Core/ncs_sdk.hpp  Il2Cpp/ncs_il2cpp.hpp  Unity/ncs_unity.hpp
-Mods/HelloWorld  Mods/DebugOverlay
+  Core/ncmk_mod_api.h        stable C ABI (NCMK_LOADER_API = 2)
+  Core/ncmk_sdk.hpp  Il2Cpp/ncmk_il2cpp.hpp  Unity/ncmk_unity.hpp
+  Input/ncmk_input.hpp  UI/ncmk_ui.hpp  Config/ncmk_config.hpp
+Mods/HelloWorld  Mods/DebugOverlay   sample mods
+DeviceMods/                 Mods/ + Config/ pushed to the headset's NCMKMods folder
 Tools/  Versions/  Backups/  Builds/  Cache/  Logs/  Keys/
 ```
 
@@ -116,7 +128,7 @@ changes needed.
 
 ## Portable tools (Install / Repair Tools)
 
-Everything is downloaded **into the NightClubModKit folder**, never system-wide, and the user's
+Everything is downloaded **into the NCMK folder**, never system-wide, and the user's
 `PATH` is never modified (tools are prepended to the PATH of the build process only):
 
 ```
@@ -130,7 +142,7 @@ Release\
 │   ├── cmake\        CMake 3.31.7 (Kitware)              GitHub release, SHA-256 from the release's SHA-256.txt
 │   ├── ninja\        Ninja 1.12.1                        GitHub release, pinned SHA-256 of the official asset
 │   └── tools.json    installed versions + URL + SHA-256 of every archive
-├── Native\           loader sources + build.ps1; out\arm64-v8a\libncsloader.so
+├── Native\           loader sources + build.ps1; out\arm64-v8a\libncmkloader.so
 └── ...
 ```
 
@@ -151,12 +163,12 @@ CLI equivalents:
 ```powershell
 .\NightClubPatcher.Cli.exe --check-tools                       # ADB / Build Tools / JDK 17 / NDK / CMake / Ninja / Native Loader
 .\NightClubPatcher.Cli.exe --install-tools [--accept-licenses]  # install / repair (add --no-native to skip NDK/CMake/Ninja)
-.\NightClubPatcher.Cli.exe --build-native                      # -> Native\out\arm64-v8a\libncsloader.so
+.\NightClubPatcher.Cli.exe --build-native                      # -> Native\out\arm64-v8a\libncmkloader.so
 .\NightClubPatcher.Cli.exe --bundled-only ...                  # ignore Android SDK / JAVA_HOME / PATH tools
 ```
 
 CI runs this exact flow on a Windows runner with every preinstalled SDK ignored
-(`NCS_BUNDLED_TOOLS_ONLY=1`): install all tools, verify a second run downloads nothing, build the
+(`NCMK_BUNDLED_TOOLS_ONLY=1`): install all tools, verify a second run downloads nothing, build the
 loader, check that everything is *Ready*, then smoke-test the GUI.
 
 ## Requirements to build from source (Windows)
@@ -171,7 +183,7 @@ loader, check that everything is *Ready*, then smoke-test the GUI.
 
 ### Visual Studio (F5)
 
-1. Open **`NightClubModKit.sln`**. Solution Explorer shows the *Patcher* folder with
+1. Open **`NCMK.sln`**. Solution Explorer shows the *Patcher* folder with
    `NightClubPatcher.Gui` (startup project, listed first), `NightClubPatcher.Core`,
    `NightClubPatcher.Cli` and `NightClubPatcher.Tests`.
 2. Press **F5**: the WPF window opens. (If Visual Studio remembered an older startup project from a
@@ -203,12 +215,12 @@ loader, check that everything is *Ready*, then smoke-test the GUI.
 Release\
 ├── NightClubPatcher.exe        WPF GUI - main application (PE subsystem: Windows GUI, no console)
 ├── NightClubPatcher.Cli.exe    command line, advanced usage
-├── libncsloader.so             native loader (when built)
-├── libncsmod_*.so              sample mods (when built; embedded into the APK by the patcher)
+├── libncmkloader.so             native loader (when built)
+├── libncmkmod_*.so              sample mods (when built; embedded into the APK by the patcher)
 ├── Versions\                   game version profiles
 ├── Tools\                      adb / zipalign / apksigner / jdk (auto-installed on first start)
 ├── Logs\
-└── NightClubModKit.root        marks this folder as the kit root
+└── NCMK.root        marks this folder as the kit root
 ```
 
 The script **never deletes** an existing `Release\` folder: once used, it holds `Backups\` (your
@@ -218,7 +230,7 @@ profiles/tools and keeps version profiles you already pinned.
 Plain `dotnet` equivalents:
 
 ```powershell
-dotnet build NightClubModKit.sln -c Release
+dotnet build NCMK.sln -c Release
 dotnet test  Patcher\NightClubPatcher.Tests -c Release
 dotnet run   --project Patcher\NightClubPatcher.Gui          # GUI
 dotnet run   --project Patcher\NightClubPatcher.Cli -- --help
@@ -280,18 +292,18 @@ CLI equivalents: `--check-adb` (binary, version, server, devices), `--restart-ad
 5. **OPEN LOGCAT** and look for:
 
 ```
-[NCSLoader] Hello from NightClubModKit
-[NCS] STAGE 02 Worker thread
-[NCSLoader] libil2cpp.so found
-[NCSLoader] IL2CPP API ready
-[NCS]   Assembly-CSharp (… classes)
-[NCSLoader] Class found: UnityEngine.Application
-[NCS] Mod loaded: HelloWorld 1.0.0
-[NCS] NCSLoader started successfully
+[NCMK] Hello from NCMK
+[NCMK] STAGE 02 Worker thread
+[NCMK] libil2cpp.so found
+[NCMK] IL2CPP API ready
+[NCMK]   Assembly-CSharp (… classes)
+[NCMK] Class found: UnityEngine.Application
+[NCMK] Mod loaded: HelloWorld 1.0.0
+[NCMK] NCMK started successfully
 ```
 
 To run *only* the first milestone (loader, no mods), patch with `--no-mods` or untick
-*Embed libncsmod_*.so* in Advanced.
+*Embed libncmkmod_*.so* in Advanced.
 
 ## CLI (advanced)
 
@@ -326,13 +338,15 @@ Options: `--allow-unverified`, `--no-mods`, `--loader <path>`, `--mods keep|disa
 |---|---|
 | Only NightClub Simulator | package checked on every APK (`GameConstants.IsTargetPackage`); the loader also verifies `/proc/self/cmdline` and stays idle elsewhere |
 | Original backup never overwritten | `BackupManager` refuses to write if `original.apk` exists; files marked read-only; `original.sha256` + `backup.json` |
-| Modified game never backed up as original | `libncsloader.so`, `DT_NEEDED` in libmain, patch marker, embedded mods, ModKit signer, unsigned APK, debuggable manifest → *"Installed APK appears modified. Original backup will not be replaced."* |
-| Never edit the backup | all work happens on a copy in `%TEMP%\NightClubModKit\…` |
+| Modified game never backed up as original | `libncmkloader.so`, `DT_NEEDED` in libmain, patch marker, embedded mods, ModKit signer, unsigned APK, debuggable manifest → *"Installed APK appears modified. Original backup will not be replaced."* |
+| Never edit the backup | all work happens on a copy in `%TEMP%\NCMK\…` |
 | Unknown update ⇒ no auto patch | version profile + SHA-256 of libmain/libunity/libil2cpp/global-metadata → `KNOWN BUILD` / `UNKNOWN GAME UPDATE` |
-| One permanent signing key | `Keys/NightClubModKit.keystore`, never regenerated automatically (back it up!) |
+| One permanent signing key | `Keys/NCMK.keystore`, never regenerated automatically (back it up!) |
 | Signature mismatch | detected up front (installed signer hash from `dumpsys package`) and on `INSTALL_FAILED_UPDATE_INCOMPATIBLE` → *Cancel* / *Backup accessible data and reinstall* |
 | No silent data loss | uninstall only after explicit confirmation; accessible data backed up to `Backups/<pkg>/userdata/<ts>/` and restored |
-| Mod files survive restore | `/sdcard/NightClubMods` → Keep / rename to `NightClubMods.disabled` / Delete (asked) |
+| Mod files survive restore | `…/files/NCMKMods` → Keep / rename to `NCMKMods.disabled` / Delete (asked) |
+| Older kits | APKs patched by NightClubModKit (`libncsloader.so`, `libncsmod_*.so`) are detected and fully unpatched; `Keys/NightClubModKit.keystore` is migrated to `Keys/NCMK.keystore` (same key) |
+| Meta entitlement / bans | no bypass, spoofing or evasion of the game's entitlement check (`MetaAccount.OnUseEntitlement`) or its server-side ban system; **Diagnose** reports an entitlement failure |
 | Crash protection | `patched-current.apk` + `patched-previous.apk`, Safe Mode, Restore Original |
 
 **RESTORE ORIGINAL** verifies the backup (hash, package, version, no ModKit markers), stops the
@@ -356,7 +370,7 @@ and **verifies it file by file**:
    with its size (shown in the log and written to `inventory.txt`).
 2. **Several copy methods**, tried in order until every file is saved with the right size:
    `adb pull` → `adb pull` through `/storage/emulated/0` → tar stream (`adb exec-out tar`) →
-   copy to `/sdcard/Download/NightClubModKit-staging` then pull (staging deleted afterwards) →
+   copy to `/sdcard/Download/NCMK-staging` then pull (staging deleted afterwards) →
    file-by-file pull of whatever is still missing.
 3. **Exact report** — e.g. `Android/data: 12/12 files saved (3.4 MB) - complete, verified (method:
    tar stream)` or the list of missing files and why the folder could not be read.
@@ -374,33 +388,44 @@ Backups are kept in `Backups\com.mandegames.NightClubSimulater\userdata\<date>\`
 
 ## Writing mods
 
-See [`docs/MODDING.md`](docs/MODDING.md). In short, a mod is `libncsmod_<name>.so` exporting
-`NCSMod_GetInfo`, `NCSMod_Load`, and optionally `NCSMod_Update` / `NCSMod_Unload`. Mods are
-either embedded into the APK by the patcher (always works) or dropped into
-`/sdcard/NightClubMods/Mods/` (copied to app-private storage before `dlopen`).
+See [`docs/MODDING.md`](docs/MODDING.md): lifecycle and threads, every export and host-API
+function, the C++ SDK (`NCMK::Unity`, `NCMK::Input`, `NCMK::UI`, `NCMK::Config`) and a complete
+example mod. In short, a mod is `libncmkmod_<name>.so` exporting `NCMKMod_GetInfo`,
+`NCMKMod_Load` and any of `NCMKMod_OnUpdate` / `OnLateUpdate` / `OnFixedUpdate` /
+`OnSceneLoaded` (Unity main thread), `OnBackgroundTick` (worker, ~10 Hz) and `Unload`. Mods built
+for API 1 and NightClubModKit-era mods (`libncsmod_*.so`, `NCSMod_*`) still load.
 
-On-device folders (`/sdcard/NightClubMods`, falling back to
-`/sdcard/Android/data/<pkg>/files/NightClubMods` when shared storage is not writable):
+Mods are either embedded into the APK by the patcher (always works) or put in `DeviceMods\Mods\`
+and pushed to the headset (copied to app-private storage before `dlopen`).
+
+On-device folder — `/sdcard/Android/data/com.mandegames.NightClubSimulater/files/NCMKMods`
+(the game has no storage permission, so this is the only shared folder it can use; uninstalling the
+game deletes it):
 
 ```
-NightClubMods/
-├── Mods/          external libncsmod_*.so
-├── Config/        config.json  ({"loader":{"logging":true,"safeMode":false},"mods":{"ncs.debugoverlay":true}})
+NCMKMods/
+├── Mods/          external libncmkmod_*.so
+├── Config/        config.json  ({"loader":{"logging":true,"safeMode":false},"mods":{"ncmk.debugoverlay":true}})
+│                  <modId>.cfg  (NCMK::Config, one per mod)
 ├── Logs/          latest.log
 ├── Cache/
 ├── Overrides/     Textures/ Audio/ Bundles/  (reserved for the asset override system)
-└── disable_mods   ← presence = SAFE MODE (loader + IL2CPP start, no mods)
+└── disable_mods   ← presence = SAFE MODE (loader + IL2CPP start, no mods, no dispatcher)
 ```
 
 ## Testing without a headset
 
 `Native/Tests/run_host_test.sh` (Linux) builds the loader for the host, patches a stand-in
 `libmain.so` **with the C# ELF patcher**, and runs a fake game that loads
-`libmain → libunity → libil2cpp` in Unity's order against a fake IL2CPP runtime. It checks every
-startup stage, both sample mods, Safe Mode and the foreign-package refusal.
+`libmain → libunity → libil2cpp` in Unity's order against a fake IL2CPP runtime, then plays a
+72 Hz player loop that calls per-frame methods through `MethodInfo` slot 0 like Unity. It checks
+every startup stage, the main-thread dispatcher (fallback after 5 s, per-frame dedupe, original
+called first, slots restored on unload, untouched in Safe Mode), every API 2 host function, both
+sample mods, a NightClubModKit-era mod, Safe Mode and the foreign-package refusal.
+`Native/Tests/check_doc_example.sh` compiles and loads the example mod from `docs/MODDING.md`.
 
 ## Status
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phase-by-phase status (phases 1–30 implemented
-in code; on-device verification pending), and what is still planned (Cpp2IL cache, SDK
-generator, object explorer, asset overrides, FULL PATCH, main-thread hooks).
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phase-by-phase status. Everything is implemented
+in code and tested on the host only: **every item still needs on-device verification**. Planned:
+Cpp2IL cache, SDK generator, object explorer, asset overrides, FULL PATCH.

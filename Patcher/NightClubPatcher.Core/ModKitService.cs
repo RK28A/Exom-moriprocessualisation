@@ -4,6 +4,7 @@ using NightClubPatcher.Core.Backup;
 using NightClubPatcher.Core.Builds;
 using NightClubPatcher.Core.Diagnostics;
 using NightClubPatcher.Core.Infrastructure;
+using NightClubPatcher.Core.Mods;
 using NightClubPatcher.Core.Patching;
 using NightClubPatcher.Core.Recovery;
 using NightClubPatcher.Core.Signing;
@@ -478,6 +479,11 @@ public sealed class ModKitService
         if (!ConnectDevice(out var msg)) return (p, new InstallResult(false, msg));
         var backup = Backups.Latest();
         var i = Installer.Install(Adb, p.OutputApk, p.Splits, ui, backup?.Metadata?.SignerJavaHash, ModKitJavaHash, "patched build");
+        if (i.Ok)
+        {
+            var push = PushModsAndConfig();
+            if (!push.Ok) Log.Warn("Mods/config not pushed: " + push.Summary);
+        }
         if (i.Ok && launch) Launch();
         return (p, i);
     }
@@ -501,7 +507,7 @@ public sealed class ModKitService
                     var a = ApkInspector.Analyze(pulled, new ApkInspectorOptions { ComputeFileHashes = false });
                     if (a.IsPatchedByModKit) source = pulled;
                     else if (!a.IsPatchedByModKit && current == null)
-                        return (PatchResult.Fail("The installed game is not patched by NightClubModKit. Nothing to unpatch."), null);
+                        return (PatchResult.Fail("The installed game is not patched by NCMK. Nothing to unpatch."), null);
                 }
             }
         }
@@ -565,18 +571,31 @@ public sealed class ModKitService
         return Adb.Launch(GameConstants.PackageName);
     }
 
+    /// <summary>
+    /// Creates NCMKMods (Mods/Config/Logs) in the game's external files folder and pushes
+    /// DeviceMods/Mods/*.so and DeviceMods/Config/* (config files are never overwritten unless asked).
+    /// </summary>
+    public PushReport PushModsAndConfig(bool overwriteConfig = false)
+    {
+        if (!ConnectDevice(out var msg)) { Log.Error(msg); return new PushReport(false, 0, 0, new[] { msg }); }
+        Log.Step("Pushing mods and config to " + GameConstants.DeviceModsRoot);
+        var r = new DeviceModPusher(Paths, Log).Push(Adb, overwriteConfig);
+        if (r.Ok) Log.Success(r.Summary);
+        else Log.Error(r.Summary);
+        return r;
+    }
+
     public bool SetSafeMode(bool enabled)
     {
         if (!ConnectDevice(out var msg)) { Log.Error(msg); return false; }
         if (enabled)
         {
             Adb.Shell($"mkdir -p \"{GameConstants.DeviceModsRoot}\" && touch \"{GameConstants.DeviceSafeModeFlag}\"");
-            Adb.Shell($"mkdir -p \"{GameConstants.DeviceFallbackModsRoot}\" 2>/dev/null; touch \"{GameConstants.DeviceFallbackModsRoot}/disable_mods\" 2>/dev/null");
             Log.Success("Safe Mode enabled: the loader will start but no third-party mods will load.");
         }
         else
         {
-            Adb.Shell($"rm -f \"{GameConstants.DeviceSafeModeFlag}\" \"{GameConstants.DeviceFallbackModsRoot}/disable_mods\"");
+            Adb.Shell($"rm -f \"{GameConstants.DeviceSafeModeFlag}\"");
             Log.Success("Safe Mode disabled.");
         }
         return true;
@@ -630,7 +649,7 @@ public sealed class ModKitService
                 r.Add("Current signature", CheckStatus.Info, $"{installed.Describe()} [{string.Join(",", installed.SignatureHashes)}]");
                 r.Add("Loader (extracted libs)", CheckStatus.Info, installed.LoaderFilePresent switch
                 {
-                    true => "libncsloader.so present",
+                    true => "libncmkloader.so present",
                     false => "not present",
                     _ => "unknown (native libs not extracted / not readable)",
                 });
@@ -646,7 +665,16 @@ public sealed class ModKitService
             r.Add("Mod folder", CheckStatus.Info, Adb.RemoteExists(GameConstants.DeviceModsRoot) ? GameConstants.DeviceModsRoot : "absent");
             r.Add("Safe mode flag", CheckStatus.Info, Adb.RemoteExists(GameConstants.DeviceSafeModeFlag) ? "ON" : "off");
             r.LoaderLog.AddRange(Logcat.LoaderLog(Adb));
-            r.RelevantLogcat.AddRange(Logcat.Dump(Adb).TakeLast(600));
+            foreach (var legacy in GameConstants.LegacyDeviceModsRoots.Where(Adb.RemoteExists))
+                r.Add("Legacy mod folder", CheckStatus.Info, legacy + " (older kit; the NCMK loader uses " + GameConstants.DeviceModsRoot + ")");
+            var logcat = Logcat.Dump(Adb);
+            r.RelevantLogcat.AddRange(logcat.TakeLast(600));
+            var entitlement = LogcatFilter.EntitlementFailures(logcat);
+            r.Add("Meta entitlement", entitlement.Count > 0 ? CheckStatus.Warn : CheckStatus.Info,
+                entitlement.Count > 0
+                    ? $"the game's entitlement check appears to have FAILED ({entitlement.Count} log line(s), last: {entitlement[^1].Trim()}). " +
+                      "The re-signed APK may be refused by Meta's entitlement check; NCMK does not bypass it. Restore the original game if it will not start."
+                    : "no entitlement failure in logcat");
             r.CrashLog.AddRange(Logcat.CrashBuffer(Adb));
         }
 
@@ -680,7 +708,7 @@ public sealed class ModKitService
         r.Add("Patched APK (current)", cur != null ? CheckStatus.Pass : CheckStatus.Info, cur ?? "none");
         r.Add("Patched APK (previous)", CheckStatus.Info, prev ?? "none");
         var loader = Paths.FindLoader();
-        r.Add("Loader build", loader != null ? CheckStatus.Pass : CheckStatus.Warn, loader ?? "libncsloader.so not built (Native/build.ps1)");
+        r.Add("Loader build", loader != null ? CheckStatus.Pass : CheckStatus.Warn, loader ?? "libncmkloader.so not built (Native/build.ps1)");
         var ks = Keys.TryLoad();
         r.Add("Signing key", ks != null ? CheckStatus.Pass : CheckStatus.Info, ks != null ? $"{Paths.KeystorePath} sha256={ks.CertSha256}" : "not created yet (created on first patch)");
         return r;

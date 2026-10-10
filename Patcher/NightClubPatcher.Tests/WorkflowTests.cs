@@ -3,6 +3,7 @@ using System.Text;
 using NightClubPatcher.Core;
 using NightClubPatcher.Core.Apk;
 using NightClubPatcher.Core.Backup;
+using NightClubPatcher.Core.Elf;
 using NightClubPatcher.Core.Infrastructure;
 using NightClubPatcher.Core.Patching;
 using NightClubPatcher.Core.Versions;
@@ -127,7 +128,7 @@ public class WorkflowTests
     public void Repository_version_profile_matches_target_game()
     {
         var dir = AppContext.BaseDirectory;
-        while (dir != null && !File.Exists(Path.Combine(dir, "NightClubModKit.sln"))) dir = Path.GetDirectoryName(dir);
+        while (dir != null && !File.Exists(Path.Combine(dir, "NCMK.sln"))) dir = Path.GetDirectoryName(dir);
         Assert.NotNull(dir);
         var p = Json.Read<VersionProfile>(Path.Combine(dir!, "Versions", "1.1.0-212.json"))!;
         Assert.Equal(GameConstants.PackageName, p.Package);
@@ -136,6 +137,19 @@ public class WorkflowTests
         Assert.Equal("6000.2.2f1", p.UnityVersion);
         Assert.Equal("arm64-v8a", p.Architecture);
         Assert.Equal("IL2CPP", p.Backend);
+        Assert.Equal(31, p.MetadataVersion);
+        Assert.Contains(p.Facts!, f => f.Contains("Android/data/com.mandegames.NightClubSimulater/files/NCMKMods"));
+    }
+
+    [Fact]
+    public void Metadata_version_mismatch_is_reported()
+    {
+        using var tmp = new TempDir();
+        var (paths, _) = Kit(tmp);
+        var store = new ProfileStore(paths);
+        store.Save(new VersionProfile { VersionName = "1.1.0", VersionCode = 212, UnityVersion = "6000.2.2f1", MetadataVersion = 29 });
+        var apk = ApkInspector.Analyze(FakeApk.Create(tmp.File("game.apk"))); // fake metadata is v31
+        Assert.Contains(store.Evaluate(apk).Details, d => d.Contains("global-metadata.dat version 31 differs from profile (29)"));
     }
 
     [Fact]
@@ -146,7 +160,7 @@ public class WorkflowTests
         var before = File.ReadAllBytes(src);
         var original = ApkInspector.Analyze(src);
         var ws = PatchWorkspace.Create("test");
-        var modPath = tmp.File("libncsmod_helloworld.so");
+        var modPath = tmp.File("libncmkmod_helloworld.so");
         File.WriteAllBytes(modPath, Fixtures.LoaderStubArm64);
 
         List<string> injected;
@@ -160,8 +174,8 @@ public class WorkflowTests
         Assert.True(patched.LibMainNeedsLoader);
         Assert.NotNull(patched.Marker);
         Assert.Equal(original.ApkSha256, patched.Marker!.OriginalApkSha256);
-        Assert.Contains("libncsmod_helloworld.so", patched.EmbeddedMods);
-        Assert.Equal(new[] { "libncsloader.so", "libncsmod_helloworld.so" }, injected);
+        Assert.Contains("libncmkmod_helloworld.so", patched.EmbeddedMods);
+        Assert.Equal(new[] { "libncmkloader.so", "libncmkmod_helloworld.so" }, injected);
         Assert.Null(patched.Signer);           // old signature stripped, must be re-signed
         Assert.True(patched.IsPatchedByModKit);
 
@@ -183,10 +197,54 @@ public class WorkflowTests
     }
 
     [Fact]
+    public void Legacy_NightClubModKit_patch_is_detected_and_fully_removed()
+    {
+        using var tmp = new TempDir();
+        var src = FakeApk.Create(tmp.File("original.apk"));
+        var original = ApkInspector.Analyze(src);
+        var originalLibMain = Fixtures.LibMainArm64;
+
+        // An APK as produced by NightClubModKit 0.3 (before the NCMK rename).
+        var legacyApk = tmp.File("legacy-patched.apk");
+        using (var zip = new ZipArchiveReader(src))
+        {
+            var plan = new ApkRewritePlan();
+            plan.ReplaceEntry(GameConstants.LibMainEntry, ElfNeededPatcher.AddNeeded(originalLibMain, "libncsloader.so").Data);
+            plan.AddEntry(GameConstants.LibDir + "libncsloader.so", Fixtures.LoaderStubArm64, EntryCompression.Stored);
+            plan.AddEntry(GameConstants.LibDir + "libncsmod_helloworld.so", Fixtures.LoaderStubArm64, EntryCompression.Stored);
+            var marker = new PatchMarker { InjectedLibraries = { "libncsloader.so", "libncsmod_helloworld.so" } };
+            plan.AddEntry("assets/NightClubModKit/patch.json", Encoding.UTF8.GetBytes(Json.Serialize(marker)), EntryCompression.Deflated);
+            ApkRewriter.Rewrite(zip, legacyApk, plan);
+        }
+
+        var legacy = ApkInspector.Analyze(legacyApk);
+        Assert.True(legacy.IsPatchedByModKit);
+        Assert.True(legacy.UsesLegacyNames);
+        Assert.True(legacy.HasLoader);
+        Assert.True(legacy.LibMainNeedsLoader);
+        Assert.NotNull(legacy.Marker);
+        Assert.Contains("libncsmod_helloworld.so", legacy.EmbeddedMods);
+        Assert.Contains(legacy.ModificationIndicators, i => i.Contains("libncsloader.so"));
+
+        var unpatched = tmp.File("unpatched.apk");
+        using (var zip = new ZipArchiveReader(legacyApk))
+            PatchEngine.BuildUnsignedUnpatchedApk(zip, originalLibMain, legacy.Marker, unpatched);
+
+        var check = ApkInspector.Analyze(unpatched);
+        Assert.False(check.IsPatchedByModKit);
+        Assert.False(check.UsesLegacyNames);
+        Assert.Empty(check.EmbeddedMods);
+        Assert.DoesNotContain("libncsloader.so", check.LibMainNeeded);
+        Assert.Equal(original.Hash(GameConstants.LibMainEntry), check.Hash(GameConstants.LibMainEntry));
+        using (var z = new ZipArchiveReader(unpatched))
+            Assert.DoesNotContain(z.Entries, e => e.Name.Contains("libncs") || e.Name.Contains("NightClubModKit"));
+    }
+
+    [Fact]
     public void Patch_marker_round_trips()
     {
-        var m = new PatchMarker { ToolVersion = "0.1.0", InjectedLibraries = { "libncsloader.so" }, PatchedAt = DateTimeOffset.UnixEpoch };
+        var m = new PatchMarker { ToolVersion = "0.1.0", InjectedLibraries = { "libncmkloader.so" }, PatchedAt = DateTimeOffset.UnixEpoch };
         var back = System.Text.Json.JsonSerializer.Deserialize<PatchMarker>(Encoding.UTF8.GetBytes(Json.Serialize(m)), Json.Options)!;
-        Assert.Equal("libncsloader.so", back.InjectedLibraries.Single());
+        Assert.Equal("libncmkloader.so", back.InjectedLibraries.Single());
     }
 }

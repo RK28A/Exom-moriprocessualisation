@@ -39,12 +39,12 @@ public sealed class ApkSigningService
         if (File.Exists(output)) File.Delete(output);
 
         _log.Step("Signing APK");
-        var env = new Dictionary<string, string> { ["NCS_KS_PASS"] = cfg.Password };
+        var env = new Dictionary<string, string> { ["NCMK_KS_PASS"] = cfg.Password };
         var r = ProcessRunner.Run(java, new[]
         {
             "-jar", jar, "sign",
             "--ks", _paths.KeystorePath, "--ks-type", cfg.StoreType, "--ks-key-alias", cfg.Alias,
-            "--ks-pass", "env:NCS_KS_PASS", "--key-pass", "env:NCS_KS_PASS",
+            "--ks-pass", "env:NCMK_KS_PASS", "--key-pass", "env:NCMK_KS_PASS",
             "--v1-signing-enabled", "true", "--v2-signing-enabled", "true", "--v3-signing-enabled", "true",
             "--out", output, input,
         }, TimeSpan.FromMinutes(10), environment: env);

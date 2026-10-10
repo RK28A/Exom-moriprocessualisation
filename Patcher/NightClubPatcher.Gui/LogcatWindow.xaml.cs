@@ -44,7 +44,7 @@ public partial class LogcatWindow : Window
 
     private void Append(string line)
     {
-        if (LoaderOnly.IsChecked == true && !line.Contains("NCS")) return;
+        if (LoaderOnly.IsChecked == true && !line.Contains("NCMK")) return;
         Output.AppendText(line + Environment.NewLine);
         if (Output.LineCount > 20000) Output.Clear();
         Output.ScrollToEnd();

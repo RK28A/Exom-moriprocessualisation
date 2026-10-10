@@ -1,4 +1,4 @@
-#include "ncs_log.h"
+#include "ncmk_log.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -10,11 +10,11 @@
 #include <android/log.h>
 #endif
 
-namespace ncs {
+namespace ncmk {
 namespace log {
 namespace {
 
-constexpr const char* kTag = "NCSLoader";
+constexpr const char* kTag = "NCMK";
 
 // Only constant-initialized globals here: logging is used from the loader constructor, which
 // may run before this file's dynamic initializers. Non-trivial state lives behind accessors.
@@ -110,4 +110,4 @@ void SetFileEnabled(bool enabled) {
 const std::string& FilePath() { return PathRef(); }
 
 }  // namespace log
-}  // namespace ncs
+}  // namespace ncmk

@@ -18,7 +18,7 @@ public class GameDataBackupTests
             120|{Data}/files/save.dat
             7|{Data}/files/sub dir/profile.json
             find: '{Data}/files/locked': Permission denied
-            __NCS_END__:1
+            __NCMK_END__:1
             """;
         var (files, errors) = UserDataService.ParseInventory(output, Data);
         Assert.Equal(new[] { "files/save.dat", "files/sub dir/profile.json" }, files.Select(f => f.RelativePath));
@@ -184,8 +184,8 @@ public class GameDataBackupTests
         var b = q.RunBackup(failPull: "Android/data/[^/]+$", failTar: true);
         Assert.True(b.ExternalData.Complete, b.ExternalData.Summary);
         Assert.Equal("staging copy in /sdcard/Download", b.ExternalData.Method);
-        Assert.False(Directory.Exists(Path.Combine(q.Root, "sdcard", "Download", "NightClubModKit-staging")) &&
-                     Directory.EnumerateFileSystemEntries(Path.Combine(q.Root, "sdcard", "Download", "NightClubModKit-staging")).Any());
+        Assert.False(Directory.Exists(Path.Combine(q.Root, "sdcard", "Download", "NCMK-staging")) &&
+                     Directory.EnumerateFileSystemEntries(Path.Combine(q.Root, "sdcard", "Download", "NCMK-staging")).Any());
     }
 
     [Fact]

@@ -93,7 +93,7 @@ public sealed class UserDataBackup
 ///   1. adb pull /sdcard/Android/data/&lt;pkg&gt;
 ///   2. adb pull /storage/emulated/0/Android/data/&lt;pkg&gt;   (same storage, different FUSE path)
 ///   3. tar stream:  adb exec-out "tar -cf - -C /sdcard/Android/data &lt;pkg&gt;"
-///   4. staging:     cp -r to /sdcard/Download/NightClubModKit-staging, adb pull, delete staging
+///   4. staging:     cp -r to /sdcard/Download/NCMK-staging, adb pull, delete staging
 ///   5. per file:    adb pull of every file still missing (keeps what can be read)
 ///
 /// An inventory (path + size of every file) is taken first; after each method every file is
@@ -102,7 +102,7 @@ public sealed class UserDataBackup
 /// </summary>
 public sealed class UserDataService
 {
-    public const string StagingDir = "/sdcard/Download/NightClubModKit-staging";
+    public const string StagingDir = "/sdcard/Download/NCMK-staging";
 
     private readonly KitPaths _paths;
     private readonly KitLog _log;
@@ -124,11 +124,11 @@ public sealed class UserDataService
         if (!report.Exists) return report;
 
         // toybox: one "size|path" line per file; errors (Permission denied...) go to stderr.
-        var r = adb.Shell($"find \"{remote}\" -type f -exec stat -c '%s|%n' {{}} + ; echo __NCS_END__:$?", TimeSpan.FromMinutes(5));
+        var r = adb.Shell($"find \"{remote}\" -type f -exec stat -c '%s|%n' {{}} + ; echo __NCMK_END__:$?", TimeSpan.FromMinutes(5));
         var (files, errors) = ParseInventory(r.StdOut + Environment.NewLine + r.StdErr, remote);
         report.Inventory.AddRange(files);
         report.InventoryErrors.AddRange(errors);
-        report.InventoryComplete = errors.Count == 0 && r.StdOut.Contains("__NCS_END__:0");
+        report.InventoryComplete = errors.Count == 0 && r.StdOut.Contains("__NCMK_END__:0");
         if (!report.InventoryComplete && errors.Count == 0) report.InventoryErrors.Add("find did not complete");
         return report;
     }
@@ -142,7 +142,7 @@ public sealed class UserDataService
         foreach (var raw in output.Split('\n'))
         {
             var line = raw.TrimEnd('\r');
-            if (line.Length == 0 || line.StartsWith("__NCS_END__", StringComparison.Ordinal)) continue;
+            if (line.Length == 0 || line.StartsWith("__NCMK_END__", StringComparison.Ordinal)) continue;
             var bar = line.IndexOf('|');
             if (bar > 0 && long.TryParse(line[..bar], out var size) && line[(bar + 1)..].StartsWith(root, StringComparison.Ordinal))
                 files.Add(new RemoteFile(line[(bar + 1 + root.Length)..], size));
@@ -291,9 +291,9 @@ public sealed class UserDataService
         var staging = $"{StagingDir}/{DateTime.Now:yyyyMMddHHmmss}";
         try
         {
-            var cp = adb.Shell($"mkdir -p \"{staging}\" && cp -r \"{remote}\" \"{staging}/\" 2>&1; echo __NCS_END__:$?", TimeSpan.FromHours(1));
-            if (!cp.StdOut.Contains("__NCS_END__:0"))
-                _log.Warn("  cp: " + cp.StdOut.Replace("__NCS_END__", "exit").Trim());
+            var cp = adb.Shell($"mkdir -p \"{staging}\" && cp -r \"{remote}\" \"{staging}/\" 2>&1; echo __NCMK_END__:$?", TimeSpan.FromHours(1));
+            if (!cp.StdOut.Contains("__NCMK_END__:0"))
+                _log.Warn("  cp: " + cp.StdOut.Replace("__NCMK_END__", "exit").Trim());
             return adb.Pull($"{staging}/{pkg}", localParent, TimeSpan.FromHours(1));
         }
         finally
@@ -338,7 +338,7 @@ public sealed class UserDataService
     private static void WriteReport(UserDataBackup b)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"NightClubModKit game data backup - {DateTimeOffset.Now:O}");
+        sb.AppendLine($"NCMK game data backup - {DateTimeOffset.Now:O}");
         sb.AppendLine(b.Describe());
         foreach (var r in new[] { b.ExternalData, b.Obb })
         {
@@ -392,7 +392,7 @@ public sealed class UserDataService
 
         // Fallback: push a tar to /data/local/tmp and extract it on the device.
         _log.Warn($"  {report.Label}: adb push incomplete, trying a tar upload");
-        var tar = Path.Combine(Path.GetTempPath(), $"ncs-restore-{Guid.NewGuid():N}.tar");
+        var tar = Path.Combine(Path.GetTempPath(), $"ncmk-restore-{Guid.NewGuid():N}.tar");
         try
         {
             TarFile.CreateFromDirectory(report.LocalPath, tar, includeBaseDirectory: true);

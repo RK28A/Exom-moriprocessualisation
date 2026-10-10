@@ -5,9 +5,9 @@
 #include <atomic>
 #include <cstring>
 
-#include "../Logging/ncs_log.h"
+#include "../Logging/ncmk_log.h"
 
-namespace NCS {
+namespace NCMK {
 namespace IL2CPP {
 
 Api api;
@@ -30,23 +30,23 @@ bool ResolveExports(void* handle) {
     g_handle = handle;
     bool ok = true;
     int missingOptional = 0;
-#define NCS_RESOLVE_REQ(ret, name, args)                                       \
+#define NCMK_RESOLVE_REQ(ret, name, args)                                       \
     api.name = reinterpret_cast<ret(*) args>(dlsym(handle, #name));           \
     if (!api.name) {                                                           \
-        NCS_LOGE("[NCS] Missing required IL2CPP export: %s", #name);            \
+        NCMK_LOGE("[NCMK] Missing required IL2CPP export: %s", #name);            \
         ok = false;                                                            \
     }
-#define NCS_RESOLVE_OPT(ret, name, args)                                       \
+#define NCMK_RESOLVE_OPT(ret, name, args)                                       \
     api.name = reinterpret_cast<ret(*) args>(dlsym(handle, #name));           \
     if (!api.name) {                                                           \
-        NCS_LOGW("[NCS] Optional IL2CPP export not found: %s", #name);          \
+        NCMK_LOGW("[NCMK] Optional IL2CPP export not found: %s", #name);          \
         ++missingOptional;                                                     \
     }
-    NCS_IL2CPP_REQUIRED(NCS_RESOLVE_REQ)
-    NCS_IL2CPP_OPTIONAL(NCS_RESOLVE_OPT)
-#undef NCS_RESOLVE_REQ
-#undef NCS_RESOLVE_OPT
-    if (ok) NCS_LOGI("[NCS] IL2CPP exports resolved (%d optional missing)", missingOptional);
+    NCMK_IL2CPP_REQUIRED(NCMK_RESOLVE_REQ)
+    NCMK_IL2CPP_OPTIONAL(NCMK_RESOLVE_OPT)
+#undef NCMK_RESOLVE_REQ
+#undef NCMK_RESOLVE_OPT
+    if (ok) NCMK_LOGI("[NCMK] IL2CPP exports resolved (%d optional missing)", missingOptional);
     return ok;
 }
 
@@ -172,6 +172,101 @@ size_t ClassCount(const Il2CppImage* image) {
     return image && api.il2cpp_image_get_class_count ? api.il2cpp_image_get_class_count(image) : 0;
 }
 
+namespace {
+// "OVRInput+Button" / "OVRInput/Button" -> "OVRInput.Button"
+std::string NormalizeTypeName(const char* n) {
+    std::string s = n ? n : "";
+    for (auto& c : s)
+        if (c == '+' || c == '/') c = '.';
+    return s;
+}
+
+// True when `full` ends with `suffix` on a name boundary ("System.Single" ends with "Single", not "ngle").
+bool TypeSuffixMatches(const std::string& full, const std::string& suffix) {
+    if (suffix.empty() || full.size() < suffix.size()) return false;
+    if (full.compare(full.size() - suffix.size(), suffix.size(), suffix) != 0) return false;
+    return full.size() == suffix.size() || full[full.size() - suffix.size() - 1] == '.';
+}
+}  // namespace
+
+const MethodInfo* FindMethodBySignature(Il2CppClass* klass, const char* name, const char* const* suffixes, int count) {
+    if (!klass || !name || count < 0 || (count > 0 && !suffixes)) return nullptr;
+    if (!api.il2cpp_class_get_methods || !api.il2cpp_method_get_name || !api.il2cpp_method_get_param_count ||
+        !api.il2cpp_method_get_param || !api.il2cpp_type_get_name)
+        return nullptr;
+    std::vector<std::string> wanted;
+    for (int i = 0; i < count; ++i) wanted.push_back(NormalizeTypeName(suffixes[i]));
+
+    for (Il2CppClass* k = klass; k; k = api.il2cpp_class_get_parent ? api.il2cpp_class_get_parent(k) : nullptr) {
+        void* iter = nullptr;
+        while (const MethodInfo* m = api.il2cpp_class_get_methods(k, &iter)) {
+            const char* mn = api.il2cpp_method_get_name(m);
+            if (!mn || strcmp(mn, name) != 0 || api.il2cpp_method_get_param_count(m) != static_cast<uint32_t>(count)) continue;
+            bool ok = true;
+            for (int i = 0; i < count && ok; ++i) {
+                char* tn = api.il2cpp_type_get_name(api.il2cpp_method_get_param(m, static_cast<uint32_t>(i)));
+                ok = tn && TypeSuffixMatches(NormalizeTypeName(tn), wanted[i]);
+                if (tn && api.il2cpp_free) api.il2cpp_free(tn);
+            }
+            if (ok) return m;
+        }
+    }
+    return nullptr;
+}
+
+Il2CppClass* FindNestedClass(Il2CppClass* outer, const char* name) {
+    if (!outer || !name || !api.il2cpp_class_get_nested_types || !api.il2cpp_class_get_name) return nullptr;
+    void* iter = nullptr;
+    while (Il2CppClass* k = api.il2cpp_class_get_nested_types(outer, &iter)) {
+        const char* n = api.il2cpp_class_get_name(k);
+        if (n && strcmp(n, name) == 0) return k;
+    }
+    return nullptr;
+}
+
+Il2CppObject* TypeOf(Il2CppClass* klass) {
+    if (!klass || !api.il2cpp_class_get_type || !api.il2cpp_type_get_object) return nullptr;
+    const Il2CppType* t = api.il2cpp_class_get_type(klass);
+    return t ? api.il2cpp_type_get_object(t) : nullptr;
+}
+
+Il2CppObject* NewObject(Il2CppClass* klass) {
+    return klass && api.il2cpp_object_new ? api.il2cpp_object_new(klass) : nullptr;
+}
+
+uint32_t Pin(Il2CppObject* obj) { return obj && api.il2cpp_gchandle_new ? api.il2cpp_gchandle_new(obj, true) : 0; }
+
+void Unpin(uint32_t handle) {
+    if (handle && api.il2cpp_gchandle_free) api.il2cpp_gchandle_free(handle);
+}
+
+int64_t GetEnumValue(Il2CppClass* enumClass, const char* name, int64_t fallback) {
+    FieldInfo* f = FindField(enumClass, name);
+    if (!f || !api.il2cpp_field_static_get_value) return fallback;
+    // Enum members are literal static fields; il2cpp copies the constant into the buffer using the
+    // underlying type's size. Read into a zeroed 64-bit value, then sign-extend from that size.
+    int64_t raw = 0;
+    api.il2cpp_field_static_get_value(f, &raw);
+    int underlying = 0x08;  // ECMA-335 ELEMENT_TYPE_I4, the default enum base type
+    if (api.il2cpp_class_enum_basetype && api.il2cpp_type_get_type)
+        if (const Il2CppType* t = api.il2cpp_class_enum_basetype(enumClass)) underlying = api.il2cpp_type_get_type(t);
+    switch (underlying) {
+        case 0x04: return static_cast<int8_t>(raw);    // I1
+        case 0x05: return static_cast<uint8_t>(raw);   // U1
+        case 0x06: return static_cast<int16_t>(raw);   // I2
+        case 0x07: return static_cast<uint16_t>(raw);  // U2
+        case 0x08: return static_cast<int32_t>(raw);   // I4
+        case 0x09: return static_cast<uint32_t>(raw);  // U4
+        default: return raw;                           // I8 / U8
+    }
+}
+
+bool IsStatic(const MethodInfo* method) {
+    if (!method || !api.il2cpp_method_get_flags) return false;
+    uint32_t iflags = 0;
+    return (api.il2cpp_method_get_flags(method, &iflags) & 0x0010) != 0;  // METHOD_ATTRIBUTE_STATIC
+}
+
 std::string CallStaticString(const char* assembly, const char* ns, const char* klass, const char* method) {
     const MethodInfo* m = FindMethod(FindClass(assembly, ns, klass), method, 0);
     Il2CppObject* exc = nullptr;
@@ -181,4 +276,4 @@ std::string CallStaticString(const char* assembly, const char* ns, const char* k
 }
 
 }  // namespace IL2CPP
-}  // namespace NCS
+}  // namespace NCMK

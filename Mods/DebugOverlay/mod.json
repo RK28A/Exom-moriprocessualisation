@@ -1,8 +1,8 @@
 {
-  "id": "ncs.debugoverlay",
+  "id": "ncmk.debugoverlay",
   "name": "Debug Overlay",
   "author": "RK",
-  "version": "0.1.0",
-  "requiredApi": 1,
-  "library": "libncsmod_debugoverlay.so"
+  "version": "0.2.0",
+  "requiredApi": 2,
+  "library": "libncmkmod_debugoverlay.so"
 }

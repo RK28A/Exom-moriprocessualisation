@@ -14,9 +14,9 @@ public sealed class ToolLocator
 
     /// <summary>
     /// Only consider tools inside the kit's Tools/ folder (ignore Android SDK, JAVA_HOME, PATH).
-    /// Set by NCS_BUNDLED_TOOLS_ONLY=1 or the CLI --bundled-only flag; used to test a clean machine.
+    /// Set by NCMK_BUNDLED_TOOLS_ONLY=1 or the CLI --bundled-only flag; used to test a clean machine.
     /// </summary>
-    public bool BundledOnly { get; set; } = Environment.GetEnvironmentVariable("NCS_BUNDLED_TOOLS_ONLY") == "1";
+    public bool BundledOnly { get; set; } = Environment.GetEnvironmentVariable("NCMK_BUNDLED_TOOLS_ONLY") == "1";
 
     public string ToolsDir => _paths.Tools;
     public string BundledNdkDir => Path.Combine(_paths.Tools, "ndk");

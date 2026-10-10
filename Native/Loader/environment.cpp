@@ -13,13 +13,13 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "../Logging/ncs_log.h"
+#include "../Logging/ncmk_log.h"
 
 #if defined(__ANDROID__)
 #include <sys/system_properties.h>
 #endif
 
-namespace ncs {
+namespace ncmk {
 
 namespace {
 bool StartsWith(const std::string& s, const char* p) { return s.rfind(p, 0) == 0; }
@@ -27,7 +27,10 @@ bool EndsWith(const std::string& s, const char* suffix) {
     size_t n = strlen(suffix);
     return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
 }
-bool IsModName(const std::string& n) { return StartsWith(n, "libncsmod_") && EndsWith(n, ".so"); }
+// libncmkmod_<name>.so, or the NightClubModKit-era libncsmod_<name>.so (still loaded).
+bool IsModName(const std::string& n) {
+    return (StartsWith(n, "libncmkmod_") || StartsWith(n, "libncsmod_")) && EndsWith(n, ".so");
+}
 
 std::string ReadFile(const std::string& path) {
     std::string out;
@@ -83,10 +86,10 @@ std::string Prop(const char* name, const char* hostEnv) {
 
 DeviceInfo DetectDevice() {
     DeviceInfo d;
-    d.model = Prop("ro.product.model", "NCS_HOST_MODEL");
-    d.codename = Prop("ro.product.device", "NCS_HOST_DEVICE");
-    d.androidRelease = Prop("ro.build.version.release", "NCS_HOST_ANDROID");
-    d.sdk = Prop("ro.build.version.sdk", "NCS_HOST_SDK");
+    d.model = Prop("ro.product.model", "NCMK_HOST_MODEL");
+    d.codename = Prop("ro.product.device", "NCMK_HOST_DEVICE");
+    d.androidRelease = Prop("ro.build.version.release", "NCMK_HOST_ANDROID");
+    d.sdk = Prop("ro.build.version.sdk", "NCMK_HOST_SDK");
 
     struct Known { const char* codename; const char* model; const char* name; bool supported; };
     static const Known kKnown[] = {
@@ -106,8 +109,8 @@ DeviceInfo DetectDevice() {
 }
 
 std::string CurrentPackageName() {
-#if defined(NCS_HOST_TEST)
-    if (const char* p = getenv("NCS_HOST_PACKAGE")) return p;
+#if defined(NCMK_HOST_TEST)
+    if (const char* p = getenv("NCMK_HOST_PACKAGE")) return p;
 #endif
     std::string s = ReadFile("/proc/self/cmdline");
     size_t z = s.find('\0');
@@ -165,11 +168,13 @@ bool CopyFile(const std::string& from, const std::string& to) {
 
 std::string ResolveModsRoot(const std::string& package) {
     std::vector<std::string> candidates;
-#if defined(NCS_HOST_TEST)
-    if (const char* r = getenv("NCS_MODS_ROOT")) candidates.emplace_back(r);
+#if defined(NCMK_HOST_TEST)
+    if (const char* r = getenv("NCMK_MODS_ROOT")) candidates.emplace_back(r);
 #endif
-    candidates.emplace_back("/sdcard/NightClubMods");
-    candidates.emplace_back("/sdcard/Android/data/" + package + "/files/NightClubMods");
+    // The game's manifest has no storage permission: its own external files folder is the only
+    // shared-storage location it can always use (and the one the patcher pushes to over adb).
+    candidates.emplace_back("/sdcard/Android/data/" + package + "/files/NCMKMods");
+    candidates.emplace_back("/storage/emulated/0/Android/data/" + package + "/files/NCMKMods");
 
     for (const auto& root : candidates) {
         if (!MakeDirs(root + "/Logs")) continue;
@@ -221,8 +226,7 @@ LoaderConfig LoadConfig(const std::string& modsRoot) {
 }
 
 bool SafeModeFlagPresent(const std::string& modsRoot) {
-    if (!modsRoot.empty() && FileExists(modsRoot + "/disable_mods")) return true;
-    return FileExists("/sdcard/NightClubMods/disable_mods");
+    return !modsRoot.empty() && FileExists(modsRoot + "/disable_mods");
 }
 
 std::vector<std::string> ListModFilesInDir(const std::string& dir) {
@@ -282,4 +286,4 @@ std::vector<std::string> ListEmbeddedMods(const std::string& apkPath) {
     return out;
 }
 
-}  // namespace ncs
+}  // namespace ncmk

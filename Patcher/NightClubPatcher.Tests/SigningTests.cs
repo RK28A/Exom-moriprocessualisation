@@ -52,6 +52,26 @@ public class SigningTests
         Assert.Equal("v1", signer!.Scheme);
         Assert.Equal(cfg.CertSha256, signer.CertSha256);
         Assert.Equal(cfg.CertJavaHash, signer.JavaHash);
-        Assert.Contains("NightClubModKit", signer.Subject);
+        Assert.Contains("NCMK", signer.Subject);
+    }
+
+    [Fact]
+    public void Legacy_NightClubModKit_keystore_is_migrated_not_regenerated()
+    {
+        using var tmp = new TempDir();
+        var paths = new KitPaths(tmp.File("kit"));
+        paths.EnsureCreated();
+        var legacyBytes = new byte[] { 1, 2, 3, 4, 5 };
+        File.WriteAllBytes(paths.LegacyKeystorePath, legacyBytes);
+        // keystore.json written by the old kit: alias "ncsmodkit".
+        File.WriteAllText(paths.KeystoreConfigPath, "{\"alias\":\"ncsmodkit\",\"password\":\"x\",\"certSha256\":\"aa\",\"certJavaHash\":\"1\"}");
+
+        var keys = new KeystoreManager(paths, new ToolLocator(paths), new KitLog(null));
+        var cfg = keys.EnsureKeystore(); // must not call keytool
+
+        Assert.Equal(legacyBytes, File.ReadAllBytes(paths.KeystorePath));
+        Assert.True(File.Exists(paths.LegacyKeystorePath));
+        Assert.Equal("ncsmodkit", cfg.Alias);
+        Assert.Equal("aa", cfg.CertSha256);
     }
 }

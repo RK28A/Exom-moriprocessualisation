@@ -10,7 +10,7 @@ namespace NightClubPatcher.Tests;
 
 internal sealed class TempDir : IDisposable
 {
-    public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ncs-tests-" + Guid.NewGuid().ToString("N"));
+    public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ncmk-tests-" + Guid.NewGuid().ToString("N"));
     public TempDir() => Directory.CreateDirectory(Path);
     public string File(string name) => System.IO.Path.Combine(Path, name);
 
@@ -33,7 +33,7 @@ internal static class Fixtures
 {
     public static string Dir => System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures");
     public static byte[] LibMainArm64 => File.ReadAllBytes(System.IO.Path.Combine(Dir, "libmain_arm64.so"));
-    public static byte[] LoaderStubArm64 => File.ReadAllBytes(System.IO.Path.Combine(Dir, "libncsloader_stub_arm64.so"));
+    public static byte[] LoaderStubArm64 => File.ReadAllBytes(System.IO.Path.Combine(Dir, "libncmkloader_stub_arm64.so"));
 }
 
 /// <summary>Builds compiled (binary) AndroidManifest.xml documents for tests.</summary>

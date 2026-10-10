@@ -6,7 +6,8 @@ namespace NightClubPatcher.Core.Signing;
 
 public sealed class KeystoreConfig
 {
-    public string Alias { get; set; } = "ncsmodkit";
+    /// <summary>Default for configs written before the alias was stored; new keys use "ncmk".</summary>
+    public string Alias { get; set; } = KeystoreManager.LegacyAlias;
     public string Password { get; set; } = "";
     public string StoreType { get; set; } = "PKCS12";
     public string? CertSha256 { get; set; }
@@ -15,11 +16,14 @@ public sealed class KeystoreConfig
 }
 
 /// <summary>
-/// Owns the single, permanent NightClubModKit signing key. The key is created once and reused
+/// Owns the single, permanent NCMK signing key. The key is created once and reused
 /// for every patched build so updates install over each other without uninstalling.
 /// </summary>
 public sealed class KeystoreManager
 {
+    public const string DefaultAlias = "ncmk";
+    public const string LegacyAlias = "ncsmodkit";
+
     private readonly KitPaths _paths;
     private readonly ToolLocator _tools;
     private readonly KitLog _log;
@@ -31,10 +35,23 @@ public sealed class KeystoreManager
         _log = log;
     }
 
+    /// <summary>
+    /// Keys/NightClubModKit.keystore (pre-NCMK name) becomes Keys/NCMK.keystore. The file is copied,
+    /// never regenerated: the certificate must stay the same or the installed modded game could no
+    /// longer be updated. The old file is kept as a backup.
+    /// </summary>
+    public void MigrateLegacyKeystore()
+    {
+        if (File.Exists(_paths.KeystorePath) || !File.Exists(_paths.LegacyKeystorePath)) return;
+        File.Copy(_paths.LegacyKeystorePath, _paths.KeystorePath);
+        _log.Info($"Signing key migrated: {Path.GetFileName(_paths.LegacyKeystorePath)} -> {Path.GetFileName(_paths.KeystorePath)} (same key; the old file is kept).");
+    }
+
     public bool Exists => File.Exists(_paths.KeystorePath) && File.Exists(_paths.KeystoreConfigPath);
 
     public KeystoreConfig? TryLoad()
     {
+        MigrateLegacyKeystore();
         if (!Exists) return null;
         var cfg = Json.Read<KeystoreConfig>(_paths.KeystoreConfigPath);
         if (cfg != null && (cfg.CertSha256 == null || cfg.CertJavaHash == null))
@@ -60,17 +77,18 @@ public sealed class KeystoreManager
 
         var cfg = new KeystoreConfig
         {
+            Alias = DefaultAlias,
             Password = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant(),
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        _log.Step("Generating the permanent NightClubModKit signing key (one time only)");
-        var env = new Dictionary<string, string> { ["NCS_KS_PASS"] = cfg.Password };
+        _log.Step("Generating the permanent NCMK signing key (one time only)");
+        var env = new Dictionary<string, string> { ["NCMK_KS_PASS"] = cfg.Password };
         var r = ProcessRunner.Run(keytool, new[]
         {
             "-genkeypair", "-keystore", _paths.KeystorePath, "-storetype", cfg.StoreType,
             "-alias", cfg.Alias, "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
-            "-dname", "CN=NightClubModKit, OU=Modding, O=NightClubModKit",
-            "-storepass:env", "NCS_KS_PASS", "-keypass:env", "NCS_KS_PASS",
+            "-dname", "CN=NCMK, OU=Modding, O=NCMK",
+            "-storepass:env", "NCMK_KS_PASS", "-keypass:env", "NCMK_KS_PASS",
         }, TimeSpan.FromMinutes(2), environment: env);
         if (!r.Ok) throw new InvalidOperationException("keytool failed: " + r.Combined);
 

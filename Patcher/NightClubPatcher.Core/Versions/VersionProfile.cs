@@ -25,6 +25,15 @@ public sealed class VersionProfile
     public string Backend { get; set; } = "IL2CPP";
     public string? XrRuntime { get; set; }
 
+    /// <summary>global-metadata.dat version (31 for Unity 6000.x). A different value means a different IL2CPP build.</summary>
+    public int? MetadataVersion { get; set; }
+
+    /// <summary>Major managed libraries observed in the build (informational, for mod authors).</summary>
+    public List<string>? Stack { get; set; }
+
+    /// <summary>Facts read from the real APK that shape how NCMK works (informational).</summary>
+    public List<string>? Facts { get; set; }
+
     /// <summary>SHA-256 of the four critical files of the original (unmodified) game.</summary>
     public FileFingerprints Hashes { get; set; } = new();
 

@@ -6,6 +6,25 @@
   "architecture": "arm64-v8a",
   "backend": "IL2CPP",
   "xrRuntime": "Oculus XR / Meta XR",
+  "metadataVersion": 31,
+  "stack": [
+    "Photon Fusion",
+    "Photon Voice",
+    "HurricaneVR",
+    "MTFrame",
+    "mod.io",
+    "UMod",
+    "UnityEngine.UI",
+    "TextMeshPro",
+    "Oculus.VR (OVRInput / OVRManager)"
+  ],
+  "facts": [
+    "AndroidManifest has no storage permission: NCMKMods lives in /sdcard/Android/data/com.mandegames.NightClubSimulater/files/NCMKMods.",
+    "libil2cpp.so exports all 241 il2cpp_* functions.",
+    "libmain.so only exports JNI_OnLoad and needs liblog, libm, libdl, libc.",
+    "global-metadata.dat is version 31 and not encrypted.",
+    "Meta entitlement check (MetaAccount.OnUseEntitlement) and a server-side ban system: NCMK adds no bypass, spoofing or evasion; diagnostics report entitlement failures."
+  ],
   "hashes": {
     "libMain": null,
     "libUnity": null,

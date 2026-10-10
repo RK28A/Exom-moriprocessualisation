@@ -11,20 +11,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build libncsloader.so + mods
+      - name: Build libncmkloader.so + mods
         run: |
           sudo apt-get install -y ninja-build
           ./Native/build.sh "$ANDROID_NDK_LATEST_HOME"
-      - name: Check ELF
+      - name: Check ELF (names, exports, dependencies, 16 KB pages)
         run: |
-          for f in Native/out/arm64-v8a/*.so; do
+          set -euo pipefail
+          OUT=Native/out/arm64-v8a
+          ls -la "$OUT"
+          # NCMK names only: loader + both samples, nothing with the old libncs* names.
+          for f in libncmkloader.so libncmkmod_helloworld.so libncmkmod_debugoverlay.so; do
+            test -f "$OUT/$f" || { echo "missing $f"; exit 1; }
+          done
+          if ls "$OUT" | grep -q '^libncs'; then echo "legacy libncs* output found"; exit 1; fi
+          for f in "$OUT"/*.so; do
+            echo "== $f"
             readelf -h "$f" | grep -q AArch64
             readelf -d "$f" | grep NEEDED
+            # Self-contained: c++_static, only Android system libraries (like the game's libmain.so).
+            if readelf -d "$f" | grep NEEDED | grep -vE '\[(liblog|libdl|libc|libm)\.so\]'; then
+              echo "unexpected dependency in $f"; exit 1
+            fi
+            readelf -lW "$f" | awk '$1=="LOAD" && $NF!="0x4000" { bad=1 } END { exit bad }' || { echo "LOAD not 16 KB aligned in $f"; exit 1; }
           done
-          readelf -Ws --dyn-syms Native/out/arm64-v8a/libncsmod_helloworld.so | grep -E "NCSMod_(GetInfo|Load)"
+          SYMS() { readelf -Ws --dyn-syms "$1"; }
+          SYMS $OUT/libncmkloader.so | grep -q ' NCMK_GetHostApi$'
+          SYMS $OUT/libncmkloader.so | grep -q ' NCMK_Shutdown$'
+          SYMS $OUT/libncmkmod_helloworld.so | grep -qE ' NCMKMod_GetInfo$'
+          SYMS $OUT/libncmkmod_helloworld.so | grep -qE ' NCMKMod_Load$'
+          SYMS $OUT/libncmkmod_debugoverlay.so | grep -qE ' NCMKMod_OnUpdate$'
+          SYMS $OUT/libncmkmod_debugoverlay.so | grep -qE ' NCMKMod_OnSceneLoaded$'
+          if SYMS $OUT/libncmkloader.so | grep -q ' NCS'; then echo "loader still exports NCS* symbols"; exit 1; fi
+          echo "ELF checks passed"
       - uses: actions/upload-artifact@v4
         with:
-          name: NightClubModKit-native-arm64-v8a
+          name: NCMK-native-arm64-v8a
           path: Native/out/arm64-v8a/*.so
 
   host-test:
@@ -37,8 +59,21 @@ jobs:
           dotnet-version: 8.0.x
       - name: Unit tests
         run: dotnet test Patcher/NightClubPatcher.Tests
-      - name: Host end-to-end test (patched libmain -> loader -> fake il2cpp -> mods)
+      - name: Host end-to-end test (patched libmain -> loader -> dispatcher -> fake il2cpp -> mods), GCC Debug
         run: ./Native/Tests/run_host_test.sh
+      - name: docs/MODDING.md example mod compiles and loads
+        run: ./Native/Tests/check_doc_example.sh
+      - name: Host end-to-end test, Clang Release (NDEBUG SDK paths)
+        run: BUILD_DIR="$PWD/Native/build-host-clang" BUILD_TYPE=Release CC=clang CXX=clang++ ./Native/Tests/run_host_test.sh
+      - name: Upload host test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-test-logs
+          path: |
+            Native/build-host*/host_game*.log
+            Native/build-host*/NCMKMods/Logs/latest.log
+          if-no-files-found: ignore
 
   windows:
     name: Windows release (GUI NightClubPatcher.exe + CLI)
@@ -52,7 +87,7 @@ jobs:
       - name: Get the native loader built by the NDK job
         uses: actions/download-artifact@v4
         with:
-          name: NightClubModKit-native-arm64-v8a
+          name: NCMK-native-arm64-v8a
           path: Native/out/arm64-v8a
       - name: Build-Windows.ps1 (build, test, publish, assemble Release, smoke-test GUI + CLI)
         shell: pwsh
@@ -79,7 +114,7 @@ jobs:
     runs-on: windows-latest
     env:
       # Ignore the runner's preinstalled Android SDK / JDK / CMake: behave like a clean Windows PC.
-      NCS_BUNDLED_TOOLS_ONLY: "1"
+      NCMK_BUNDLED_TOOLS_ONLY: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -105,7 +140,7 @@ jobs:
         run: |
           .\Release\NightClubPatcher.Cli.exe --build-native
           if ($LASTEXITCODE) { throw "build-native failed" }
-          if (-not (Test-Path .\Release\Native\out\arm64-v8a\libncsloader.so)) { throw "libncsloader.so missing" }
+          if (-not (Test-Path .\Release\Native\out\arm64-v8a\libncmkloader.so)) { throw "libncmkloader.so missing" }
       - name: Setup status must be all Ready
         shell: pwsh
         run: |

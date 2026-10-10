@@ -15,10 +15,11 @@ struct FieldInfo;
 struct Il2CppObject;
 struct Il2CppString;
 struct Il2CppThread;
+struct Il2CppType;
 typedef uint16_t Il2CppChar;
 
 // Exported IL2CPP API, resolved with dlsym (never by offset).
-#define NCS_IL2CPP_REQUIRED(X)                                                                         \
+#define NCMK_IL2CPP_REQUIRED(X)                                                                         \
     X(Il2CppDomain*, il2cpp_domain_get, (void))                                                        \
     X(const Il2CppAssembly**, il2cpp_domain_get_assemblies, (const Il2CppDomain*, size_t*))           \
     X(const Il2CppImage*, il2cpp_assembly_get_image, (const Il2CppAssembly*))                          \
@@ -29,7 +30,7 @@ typedef uint16_t Il2CppChar;
     X(Il2CppThread*, il2cpp_thread_attach, (Il2CppDomain*))                                            \
     X(const Il2CppImage*, il2cpp_get_corlib, (void))
 
-#define NCS_IL2CPP_OPTIONAL(X)                                                                         \
+#define NCMK_IL2CPP_OPTIONAL(X)                                                                         \
     X(FieldInfo*, il2cpp_class_get_field_from_name, (Il2CppClass*, const char*))                      \
     X(FieldInfo*, il2cpp_class_get_fields, (Il2CppClass*, void**))                                    \
     X(const char*, il2cpp_field_get_name, (FieldInfo*))                                               \
@@ -47,16 +48,32 @@ typedef uint16_t Il2CppChar;
     X(const char*, il2cpp_class_get_name, (Il2CppClass*))                                             \
     X(const char*, il2cpp_class_get_namespace, (Il2CppClass*))                                        \
     X(bool, il2cpp_is_vm_thread, (Il2CppThread*))                                                     \
-    X(Il2CppThread*, il2cpp_thread_current, (void))
+    X(Il2CppThread*, il2cpp_thread_current, (void))                                                   \
+    X(const MethodInfo*, il2cpp_class_get_methods, (Il2CppClass*, void**))                            \
+    X(const char*, il2cpp_method_get_name, (const MethodInfo*))                                       \
+    X(uint32_t, il2cpp_method_get_param_count, (const MethodInfo*))                                   \
+    X(const Il2CppType*, il2cpp_method_get_param, (const MethodInfo*, uint32_t))                      \
+    X(uint32_t, il2cpp_method_get_flags, (const MethodInfo*, uint32_t*))                              \
+    X(char*, il2cpp_type_get_name, (const Il2CppType*))                                               \
+    X(int, il2cpp_type_get_type, (const Il2CppType*))                                                 \
+    X(void, il2cpp_free, (void*))                                                                     \
+    X(Il2CppClass*, il2cpp_class_get_parent, (Il2CppClass*))                                          \
+    X(Il2CppClass*, il2cpp_class_get_nested_types, (Il2CppClass*, void**))                            \
+    X(const Il2CppType*, il2cpp_class_get_type, (Il2CppClass*))                                       \
+    X(const Il2CppType*, il2cpp_class_enum_basetype, (Il2CppClass*))                                  \
+    X(Il2CppObject*, il2cpp_type_get_object, (const Il2CppType*))                                     \
+    X(uint32_t, il2cpp_gchandle_new, (Il2CppObject*, bool))                                           \
+    X(void, il2cpp_gchandle_free, (uint32_t))                                                         \
+    X(void*, il2cpp_resolve_icall, (const char*))
 
-namespace NCS {
+namespace NCMK {
 namespace IL2CPP {
 
 struct Api {
-#define NCS_DECLARE_FN(ret, name, args) ret(*name) args = nullptr;
-    NCS_IL2CPP_REQUIRED(NCS_DECLARE_FN)
-    NCS_IL2CPP_OPTIONAL(NCS_DECLARE_FN)
-#undef NCS_DECLARE_FN
+#define NCMK_DECLARE_FN(ret, name, args) ret(*name) args = nullptr;
+    NCMK_IL2CPP_REQUIRED(NCMK_DECLARE_FN)
+    NCMK_IL2CPP_OPTIONAL(NCMK_DECLARE_FN)
+#undef NCMK_DECLARE_FN
 };
 
 extern Api api;
@@ -89,8 +106,19 @@ Il2CppString* NewString(const char* utf8);
 std::string ToUtf8(Il2CppString* str);
 size_t ClassCount(const Il2CppImage* image);
 
+/// Method `name` whose parameter type names end with `suffixes` ('+' and '/' read as '.'),
+/// searching parent classes too. Name-based only.
+const MethodInfo* FindMethodBySignature(Il2CppClass* klass, const char* name, const char* const* suffixes, int count);
+Il2CppClass* FindNestedClass(Il2CppClass* outer, const char* name);
+Il2CppObject* TypeOf(Il2CppClass* klass);
+Il2CppObject* NewObject(Il2CppClass* klass);
+uint32_t Pin(Il2CppObject* obj);
+void Unpin(uint32_t handle);
+int64_t GetEnumValue(Il2CppClass* enumClass, const char* name, int64_t fallback);
+bool IsStatic(const MethodInfo* method);
+
 /// Invokes a static parameterless method returning System.String; empty on failure.
 std::string CallStaticString(const char* assembly, const char* ns, const char* klass, const char* method);
 
 }  // namespace IL2CPP
-}  // namespace NCS
+}  // namespace NCMK

@@ -10,7 +10,7 @@ namespace NightClubPatcher.Cli;
 internal static class Program
 {
     private const string Help = """
-        NightClub Simulator Mod Patcher (NightClubModKit) - target: com.mandegames.NightClubSimulater
+        NCMK - NightClub Simulator Mod Kit - target: com.mandegames.NightClubSimulater
 
         Advanced command-line interface. The main application is the GUI: NightClubPatcher.exe
 
@@ -32,8 +32,10 @@ internal static class Program
           --list-data                  Show every file of Android/data and Android/obb of the game (copies nothing)
           --backup-data                Back up the game data now (several methods, verified file by file)
           --launch                     Start the game
-          --logcat                     Stream filtered logcat (NCSLoader/Unity/il2cpp/crashes)
-          --safe-mode on|off           Toggle /sdcard/NightClubMods/disable_mods
+          --logcat                     Stream filtered logcat (NCMK/Unity/il2cpp/crashes)
+          --push-mods                  Push DeviceMods/Mods/*.so and DeviceMods/Config/* to the headset's NCMKMods
+                                       folder (add --overwrite-config to replace config files already there)
+          --safe-mode on|off           Toggle NCMKMods/disable_mods (Android/data/<package>/files/NCMKMods)
           --pin-fingerprints           Record SHA-256 of libmain/libunity/libil2cpp/metadata in Versions/
           --analyze <apk>              Inspect any APK file (read-only)
           --import-backup <apk>        Use a local original APK as the backup
@@ -43,7 +45,7 @@ internal static class Program
           --check-tools                Setup status: ADB, Build Tools, JDK 17, Android NDK, CMake, Ninja, Native Loader
           --install-tools              Install / repair every missing tool into Tools/ (portable, PATH untouched)
                                        add --accept-licenses to skip the prompt, --no-native to skip NDK/CMake/Ninja
-          --build-native               Build libncsloader.so with the bundled NDK/CMake/Ninja -> Native/out/arm64-v8a
+          --build-native               Build libncmkloader.so with the bundled NDK/CMake/Ninja -> Native/out/arm64-v8a
           --bundled-only               Ignore Android SDK / JAVA_HOME / PATH tools (only use Tools/)
           --check-adb                  Check adb (binary, version, server) and list devices
           --restart-adb                Restart the adb server (fixes most "offline" devices)
@@ -55,9 +57,9 @@ internal static class Program
 
         Options
           --allow-unverified           Allow patching builds whose fingerprints are not verified
-          --no-mods                    Do not embed libncsmod_*.so into the APK
-          --loader <path>              Use a specific libncsloader.so
-          --mods keep|disable|delete   What to do with /sdcard/NightClubMods on restore (default: ask)
+          --no-mods                    Do not embed libncmkmod_*.so into the APK
+          --loader <path>              Use a specific libncmkloader.so
+          --mods keep|disable|delete   What to do with NCMKMods on restore (default: ask)
           --no-install                 (with --unpatch) only build the APK
           --non-interactive            Never prompt; destructive choices are cancelled
         """;
@@ -207,7 +209,7 @@ internal static class Program
                 Report(svc, p.Ok, p.Message);
                 if (i != null) Report(svc, i.Ok, i.Message);
                 if (i?.Ok == true)
-                    svc.Log.Info("Check the loader with: NightClubPatcher.Cli.exe --logcat   (expect '[NCSLoader] Hello from NightClubModKit')");
+                    svc.Log.Info("Check the loader with: NightClubPatcher.Cli.exe --logcat   (expect '[NCMK] Hello from NCMK')");
                 return p.Ok && i?.Ok == true ? 0 : 2;
             }
 
@@ -260,6 +262,9 @@ internal static class Program
                 return 0;
             }
 
+            case "--push-mods":
+                return svc.PushModsAndConfig(args.Contains("--overwrite-config")).Ok ? 0 : 2;
+
             case "--safe-mode":
             {
                 var v = Value(args, cmd);
@@ -309,7 +314,7 @@ internal static class Program
 
             case "--tools":
                 foreach (var (tool, path) in svc.Tools.Report()) Console.WriteLine($"{tool,-36} {path ?? "NOT FOUND"}");
-                Console.WriteLine($"{"libncsloader.so",-36} {svc.Paths.FindLoader() ?? "NOT BUILT"}");
+                Console.WriteLine($"{"libncmkloader.so",-36} {svc.Paths.FindLoader() ?? "NOT BUILT"}");
                 Console.WriteLine($"{"Kit root",-36} {svc.Paths.Root}");
                 return 0;
 
@@ -373,7 +378,7 @@ internal static class Program
     {
         var s = svc.Detect();
         Console.WriteLine();
-        Console.WriteLine("      NightClub Simulator Mod Patcher");
+        Console.WriteLine("      NCMK - NightClub Simulator Mod Kit");
         Console.WriteLine(new string('-', 50));
         Console.WriteLine($"Quest:                 {s.DeviceText}");
         if (s.Headset != null)

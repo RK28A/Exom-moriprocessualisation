@@ -71,7 +71,7 @@ public sealed class ToolSetup
         _tools = tools;
         _log = log;
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromMinutes(60) };
-        if (http == null) _http.DefaultRequestHeaders.UserAgent.ParseAdd("NightClubModKit/0.4");
+        if (http == null) _http.DefaultRequestHeaders.UserAgent.ParseAdd("NCMK/0.4");
     }
 
     public string ManifestPath => Path.Combine(_paths.Tools, "tools.json");

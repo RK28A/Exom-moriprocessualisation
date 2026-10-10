@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "../../SDK/Core/ncs_mod_api.h"
+#include "../../SDK/Core/ncmk_mod_api.h"
 
-namespace ncs {
+namespace ncmk {
 
 struct LoadedMod {
     void* handle = nullptr;
@@ -14,9 +14,14 @@ struct LoadedMod {
     std::string name;
     std::string version;
     std::string displayName;  // "Name version"
-    NCSMod_Update_t update = nullptr;
-    NCSMod_Unload_t unload = nullptr;
-    NCSMod_OnSceneLoaded_t onSceneLoaded = nullptr;
+    unsigned requiredApi = 1;
+    bool legacy = false;       // NightClubModKit-era mod exporting NCSMod_*
+    NCMKMod_Unload_t unload = nullptr;
+    NCMKMod_OnUpdate_t onUpdate = nullptr;
+    NCMKMod_OnLateUpdate_t onLateUpdate = nullptr;
+    NCMKMod_OnFixedUpdate_t onFixedUpdate = nullptr;
+    NCMKMod_OnSceneLoaded_t onSceneLoaded = nullptr;
+    NCMKMod_OnBackgroundTick_t onBackgroundTick = nullptr;
 };
 
 struct ModCandidate {
@@ -28,19 +33,27 @@ class PluginManager {
 public:
     void SetDisabledIds(std::vector<std::string> ids) { disabled_ = std::move(ids); }
 
-    /// Loads candidates in order; failures are logged and skipped, never fatal.
-    void LoadAll(const std::vector<ModCandidate>& candidates, const NCSHostApi* host);
-    void UpdateAll(float dt);
+    /// Loads candidates in order; failures are logged and skipped, never fatal. Worker thread.
+    void LoadAll(const std::vector<ModCandidate>& candidates, const NCMKHostApi* host);
+
+    /// Loader worker thread, ~10 Hz.
+    void BackgroundTickAll(float dt);
+
+    /// Unity main thread (dispatcher), once per frame.
+    void FrameAll(float dt, int fixedSteps, const char* sceneLoaded);
+
     void UnloadAll();
 
     const std::vector<LoadedMod>& Mods() const { return mods_; }
+    bool AnyBackgroundTick() const;
+    bool AnyMainThreadCallback() const;
 
 private:
-    bool LoadOne(const ModCandidate& c, const NCSHostApi* host);
+    bool LoadOne(const ModCandidate& c, const NCMKHostApi* host);
     bool IsDisabled(const std::string& id) const;
 
     std::vector<LoadedMod> mods_;
     std::vector<std::string> disabled_;
 };
 
-}  // namespace ncs
+}  // namespace ncmk

@@ -54,6 +54,11 @@ public sealed class ProfileStore
         if (!string.IsNullOrEmpty(profile.UnityVersion) && apk.UnityVersion != null && profile.UnityVersion != apk.UnityVersion)
             details.Add($"Unity version {apk.UnityVersion} differs from profile ({profile.UnityVersion}).");
 
+        if (profile.MetadataVersion != null && apk.Il2Cpp.MetadataVersion != null && profile.MetadataVersion != apk.Il2Cpp.MetadataVersion)
+            details.Add($"global-metadata.dat version {apk.Il2Cpp.MetadataVersion} differs from profile ({profile.MetadataVersion}).");
+        if (apk.Il2Cpp.HasMetadata && !apk.Il2Cpp.MetadataMagicValid)
+            details.Add("global-metadata.dat has no standard header (encrypted or obfuscated build).");
+
         if (!profile.Hashes.IsPinned)
         {
             details.Add("Profile has no pinned file hashes.");

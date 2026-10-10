@@ -22,7 +22,7 @@ public sealed class DiagnosticReport
     public string Render()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("NightClubModKit diagnostic report");
+        sb.AppendLine("NCMK diagnostic report");
         sb.AppendLine($"Generated: {DateTimeOffset.Now:O}");
         sb.AppendLine($"Target: {GameConstants.PackageName}");
         sb.AppendLine(new string('=', 70));
@@ -30,7 +30,7 @@ public sealed class DiagnosticReport
             sb.AppendLine($"[{c.Status.ToString().ToUpperInvariant(),-4}] {c.Name,-28} {c.Detail}");
         Section(sb, "Tools", Tools);
         Section(sb, "Loader log (device)", LoaderLog);
-        Section(sb, "Relevant logcat (NCSLoader / Unity / il2cpp / crashes)", RelevantLogcat);
+        Section(sb, "Relevant logcat (NCMK / Unity / il2cpp / crashes)", RelevantLogcat);
         Section(sb, "Android crash buffer", CrashLog);
         return sb.ToString();
     }
@@ -47,10 +47,23 @@ public sealed class DiagnosticReport
 public static partial class LogcatFilter
 {
     /// <summary>Lines worth showing in OPEN LOGCAT and the diagnostic report.</summary>
-    [GeneratedRegex(@"NCSLoader|NCSMod|\bNCS\b|\bUnity\b|libil2cpp|il2cpp|AndroidRuntime|Fatal signal|SIGSEGV|SIGABRT|\bDEBUG\b|tombstone|com\.mandegames", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"NCMK|NCSLoader|\bNCS\b|[Ee]ntitlement|\bUnity\b|libil2cpp|il2cpp|AndroidRuntime|Fatal signal|SIGSEGV|SIGABRT|\bDEBUG\b|tombstone|com\.mandegames", RegexOptions.IgnoreCase)]
     public static partial Regex Relevant();
 
-    public static readonly string[] Tags = { "NCSLoader", "Unity", "libil2cpp", "AndroidRuntime", "DEBUG", "libc" };
+    public static readonly string[] Tags = { "NCMK", "Unity", "libil2cpp", "AndroidRuntime", "DEBUG", "libc" };
+
+    [GeneratedRegex(@"entitlement", RegexOptions.IgnoreCase)]
+    private static partial Regex Entitlement();
+
+    [GeneratedRegex(@"fail|denied|not entitled|invalid|error|exception|false\b|unauthori[sz]ed|quit", RegexOptions.IgnoreCase)]
+    private static partial Regex Failure();
+
+    /// <summary>
+    /// Logcat lines showing the game's Meta entitlement check failing (MetaAccount.OnUseEntitlement).
+    /// Report only: a re-signed APK may fail it, and NCMK never bypasses or spoofs it.
+    /// </summary>
+    public static List<string> EntitlementFailures(IEnumerable<string> lines) =>
+        lines.Where(l => Entitlement().IsMatch(l) && Failure().IsMatch(l)).ToList();
 }
 
 public sealed class LogcatService
@@ -73,7 +86,7 @@ public sealed class LogcatService
 
     public List<string> LoaderLog(AdbClient adb)
     {
-        foreach (var path in new[] { GameConstants.DeviceLoaderLog, GameConstants.DeviceFallbackModsRoot + "/Logs/latest.log" })
+        foreach (var path in new[] { GameConstants.DeviceLoaderLog }.Concat(GameConstants.LegacyDeviceModsRoots.Select(r => r + "/Logs/latest.log")))
         {
             var r = adb.Shell($"cat \"{path}\" 2>/dev/null");
             if (r.Ok && r.StdOut.Trim().Length > 0)
@@ -85,7 +98,7 @@ public sealed class LogcatService
     public System.Diagnostics.Process Stream(AdbClient adb, Action<string> onLine, bool clearFirst)
     {
         if (clearFirst) adb.Run("logcat", "-c");
-        _log.Info("Streaming filtered logcat (NCSLoader, Unity, libil2cpp, AndroidRuntime, Fatal signal, SIGSEGV, SIGABRT)");
+        _log.Info("Streaming filtered logcat (NCMK, Unity, libil2cpp, AndroidRuntime, Fatal signal, SIGSEGV, SIGABRT)");
         return adb.StartLogcat(line =>
         {
             if (LogcatFilter.Relevant().IsMatch(line)) onLine(line);

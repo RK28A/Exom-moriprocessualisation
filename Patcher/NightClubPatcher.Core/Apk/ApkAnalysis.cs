@@ -9,7 +9,7 @@ namespace NightClubPatcher.Core.Apk;
 
 public sealed class PatchMarker
 {
-    public string Tool { get; set; } = "NightClubModKit";
+    public string Tool { get; set; } = "NCMK";
     public string ToolVersion { get; set; } = "";
     public string Mode { get; set; } = "FastPatch";
     public int LoaderApi { get; set; } = GameConstants.LoaderApi;
@@ -40,6 +40,8 @@ public sealed class ApkAnalysis
     public ApkSignerInfo? Signer { get; set; }
     public bool HasLoader { get; set; }
     public bool LibMainNeedsLoader { get; set; }
+    /// <summary>Patched with the pre-NCMK names (libncsloader.so, libncsmod_*.so, assets/NightClubModKit).</summary>
+    public bool UsesLegacyNames { get; set; }
     public List<string> LibMainNeeded { get; } = new();
     public List<string> EmbeddedMods { get; } = new();
     public PatchMarker? Marker { get; set; }
@@ -60,7 +62,7 @@ public sealed class ApkInspectorOptions
     public bool ComputeApkHash { get; init; } = true;
     public bool ComputeFileHashes { get; init; } = true;
 
-    /// <summary>Certificate SHA-256 of the NightClubModKit signing key, to flag APKs we signed.</summary>
+    /// <summary>Certificate SHA-256 of the NCMK signing key, to flag APKs we signed.</summary>
     public string? ModKitSignerSha256 { get; init; }
 
     /// <summary>Certificate SHA-256 of the original developer key, when known.</summary>
@@ -115,10 +117,13 @@ public static class ApkInspector
 
         a.Signer = ApkSignatureReader.Read(zip);
 
-        a.HasLoader = zip.Contains(GameConstants.LoaderEntry);
+        a.HasLoader = GameConstants.AllLoaderEntries.Any(zip.Contains);
         a.EmbeddedMods.AddRange(zip.Entries
-            .Where(e => e.Name.StartsWith(GameConstants.LibDir + GameConstants.ModLibPrefix) && e.Name.EndsWith(".so"))
+            .Where(e => GameConstants.IsModLibEntry(e.Name))
             .Select(e => e.Name[GameConstants.LibDir.Length..]));
+        a.UsesLegacyNames = zip.Contains(GameConstants.LegacyLoaderEntry) ||
+                            zip.Contains(GameConstants.LegacyPatchMarkerEntry) ||
+                            a.EmbeddedMods.Any(m => m.StartsWith(GameConstants.LegacyModLibPrefix, StringComparison.Ordinal));
 
         var libmain = zip.Find(GameConstants.LibMainEntry);
         if (libmain != null)
@@ -127,7 +132,8 @@ public static class ApkInspector
             {
                 var elf = new ElfFile(zip.ReadAllBytes(libmain));
                 a.LibMainNeeded.AddRange(elf.GetNeeded());
-                a.LibMainNeedsLoader = a.LibMainNeeded.Contains(GameConstants.LoaderLibName);
+                a.LibMainNeedsLoader = a.LibMainNeeded.Any(n => GameConstants.AllLoaderLibNames.Contains(n));
+                if (a.LibMainNeeded.Contains(GameConstants.LegacyLoaderLibName)) a.UsesLegacyNames = true;
             }
             catch (Exception ex)
             {
@@ -135,7 +141,7 @@ public static class ApkInspector
             }
         }
 
-        var marker = zip.Find(GameConstants.PatchMarkerEntry);
+        var marker = GameConstants.AllPatchMarkerEntries.Select(zip.Find).FirstOrDefault(m => m != null);
         if (marker != null)
         {
             try { a.Marker = JsonSerializer.Deserialize<PatchMarker>(zip.ReadAllBytes(marker), Json.Options); }
@@ -156,13 +162,16 @@ public static class ApkInspector
         if (options.ComputeApkHash) a.ApkSha256 = Hashing.Sha256File(apkPath);
 
         // --- modification indicators ---------------------------------------------------
-        if (a.HasLoader) a.ModificationIndicators.Add($"{GameConstants.LoaderLibName} is present.");
-        if (a.LibMainNeedsLoader) a.ModificationIndicators.Add($"libmain.so depends on {GameConstants.LoaderLibName}.");
-        if (a.Marker != null) a.ModificationIndicators.Add("NightClubModKit patch marker found.");
+        foreach (var entry in GameConstants.AllLoaderEntries.Where(zip.Contains))
+            a.ModificationIndicators.Add($"{entry[GameConstants.LibDir.Length..]} is present.");
+        foreach (var lib in a.LibMainNeeded.Where(n => GameConstants.AllLoaderLibNames.Contains(n)))
+            a.ModificationIndicators.Add($"libmain.so depends on {lib}.");
+        if (a.UsesLegacyNames) a.ModificationIndicators.Add("Patched by an older NightClubModKit build (legacy libncs* names).");
+        if (a.Marker != null) a.ModificationIndicators.Add("NCMK patch marker found.");
         if (a.EmbeddedMods.Count > 0) a.ModificationIndicators.Add($"Embedded mods: {string.Join(", ", a.EmbeddedMods)}.");
         if (a.Signer == null) a.ModificationIndicators.Add("APK is not signed.");
         if (a.Signer != null && options.ModKitSignerSha256 != null && Hashing.Equal(a.Signer.CertSha256, options.ModKitSignerSha256))
-            a.ModificationIndicators.Add("APK is signed with the NightClubModKit key.");
+            a.ModificationIndicators.Add("APK is signed with the NCMK key.");
         if (a.Signer != null && options.ExpectedOriginalSignerSha256 != null && !Hashing.Equal(a.Signer.CertSha256, options.ExpectedOriginalSignerSha256))
             a.ModificationIndicators.Add("Signing certificate differs from the original developer certificate.");
         if (manifest.Debuggable == true) a.ModificationIndicators.Add("Manifest is debuggable (store builds normally are not).");
