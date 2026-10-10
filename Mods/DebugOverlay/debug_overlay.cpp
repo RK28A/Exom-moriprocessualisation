@@ -56,6 +56,7 @@ extern "C" NCS_EXPORT void NCSMod_Update(float dt) {
     NCS_LOGI("---- NCS Debug Overlay ----");
     NCS_LOGI("Loader   : %s (API %u)", h->loaderVersion, h->apiVersion);
     NCS_LOGI("Game     : %s %s", h->packageName, h->gameVersion);
+    NCS_LOGI("Device   : %s", NCS::Game::GetDeviceName().c_str());
     NCS_LOGI("Unity    : %s", h->unityVersion);
     if (fps >= 0.f) NCS_LOGI("FPS      : %.1f (frame %d)", fps, frame);
     else NCS_LOGI("FPS      : measuring (frame %d)", frame);

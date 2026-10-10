@@ -14,6 +14,7 @@ public partial class MainWindow : Window
     private readonly ModKitService _svc;
     private readonly WpfInteraction _ui;
     private bool _busy;
+    private bool _fillingDevices;
 
     /// <summary>Set from the Advanced window.</summary>
     public bool AllowUnverified { get; set; }
@@ -69,7 +70,10 @@ public partial class MainWindow : Window
         {
             var s = await Task.Run(() => _svc.Detect());
             var a = s.BackupAnalysis;
-            QuestText.Text = s.DeviceText;
+            FillDevices(s);
+            QuestText.Text = s.DeviceText + (s.Headset != null
+                ? $"{Environment.NewLine}{s.AndroidVersion} - {s.HeadsetCompatibility?.Summary ?? (s.Headset.Supported ? "supported" : "NOT supported")}"
+                : "");
             GameText.Text = s.Installed?.Installed == true ? "Detected" : s.Device == Core.Adb.DeviceState.Connected ? "Not installed" : "Unknown (no Quest)";
             VersionText.Text = s.Installed?.VersionName ?? a?.Manifest.VersionName ?? "?";
             VersionCodeText.Text = (s.Installed?.VersionCode ?? a?.Manifest.VersionCode)?.ToString() ?? "?";
@@ -88,13 +92,42 @@ public partial class MainWindow : Window
         });
     }
 
+    private void FillDevices(KitStatus s)
+    {
+        _fillingDevices = true;
+        try
+        {
+            DeviceCombo.Items.Clear();
+            foreach (var d in s.Devices)
+                DeviceCombo.Items.Add(new System.Windows.Controls.ComboBoxItem { Content = d.Label, Tag = d.Serial, IsEnabled = d.Ready });
+            if (s.Devices.Count == 0)
+                DeviceCombo.Items.Add(new System.Windows.Controls.ComboBoxItem { Content = "No headset connected", IsEnabled = false });
+            foreach (System.Windows.Controls.ComboBoxItem item in DeviceCombo.Items)
+                if ((string?)item.Tag != null && (string?)item.Tag == (_svc.Adb.PreferredSerial ?? s.DeviceSerial))
+                    DeviceCombo.SelectedItem = item;
+        }
+        finally
+        {
+            _fillingDevices = false;
+        }
+    }
+
+    private async void DeviceCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_fillingDevices || DeviceCombo.SelectedItem is not System.Windows.Controls.ComboBoxItem { Tag: string serial }) return;
+        if (serial == _svc.Adb.PreferredSerial) return;
+        _svc.UseDevice(serial);
+        _svc.Log.Info("Selected device " + serial);
+        await RefreshAsync();
+    }
+
     private PatchOptions Options() => new() { AllowUnverified = AllowUnverified, EmbedMods = EmbedMods };
 
     private async void Patch_Click(object sender, RoutedEventArgs e)
     {
         await RunAsync("Patching", async () =>
         {
-            var r = await Task.Run(() => _svc.Patch(Options()));
+            var r = await Task.Run(() => _svc.Patch(Options(), _ui));
             Report("PATCH GAME", r.Ok, r.Message + (r.OutputApk != null ? Environment.NewLine + r.OutputApk : ""));
         });
         await RefreshAsync();

@@ -6,13 +6,26 @@
 namespace ncs {
 
 constexpr const char* kTargetPackage = "com.mandegames.NightClubSimulater";
-constexpr const char* kLoaderVersion = "0.1.0";
+constexpr const char* kLoaderVersion = "0.2.0";
 
 struct LoaderConfig {
     bool logging = true;
     bool safeMode = false;
     std::vector<std::string> disabledMods;  // "mods": { "<id>": false }
 };
+
+struct DeviceInfo {
+    std::string model;        // ro.product.model    e.g. "Quest 3S"
+    std::string codename;     // ro.product.device   e.g. "panther"
+    std::string displayName;  // "Meta Quest 3S"
+    std::string androidRelease;
+    std::string sdk;
+    bool known = false;       // a recognised Quest generation
+    bool supported = true;
+};
+
+/// Identifies the headset (Quest 2 / Pro / 3 / 3S; Quest 1 is unsupported).
+DeviceInfo DetectDevice();
 
 std::string CurrentPackageName();     // from /proc/self/cmdline
 std::string SelfLibraryPath();        // path of libncsloader.so (may contain "!/" when loaded from the APK)

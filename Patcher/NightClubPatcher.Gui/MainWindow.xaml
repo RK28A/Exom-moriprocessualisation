@@ -34,8 +34,14 @@
                 <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
                 <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
               </Grid.RowDefinitions>
-              <TextBlock Grid.Row="0" Style="{StaticResource Label}" Text="Quest"/>
-              <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Value}" x:Name="QuestText" Text="..."/>
+              <TextBlock Grid.Row="0" Style="{StaticResource Label}" Text="Quest" VerticalAlignment="Top"/>
+              <StackPanel Grid.Row="0" Grid.Column="1">
+                <DockPanel Margin="0,0,0,4">
+                  <Button DockPanel.Dock="Right" Content="↻" ToolTip="Rescan devices" Padding="8,2" Margin="6,0,0,0" Click="Refresh_Click"/>
+                  <ComboBox x:Name="DeviceCombo" SelectionChanged="DeviceCombo_SelectionChanged" ToolTip="Headset used for backup, patch and install"/>
+                </DockPanel>
+                <TextBlock Style="{StaticResource Value}" x:Name="QuestText" Text="..."/>
+              </StackPanel>
               <TextBlock Grid.Row="1" Style="{StaticResource Label}" Text="Game"/>
               <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" x:Name="GameText" Text="..."/>
               <TextBlock Grid.Row="2" Style="{StaticResource Label}" Text="Package"/>

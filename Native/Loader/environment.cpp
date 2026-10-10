@@ -15,6 +15,10 @@
 
 #include "../Logging/ncs_log.h"
 
+#if defined(__ANDROID__)
+#include <sys/system_properties.h>
+#endif
+
 namespace ncs {
 
 namespace {
@@ -61,6 +65,45 @@ bool ReadBool(const std::string& json, const std::string& key, bool def, size_t 
     return def;
 }
 }  // namespace
+
+namespace {
+std::string Prop(const char* name, const char* hostEnv) {
+#if defined(__ANDROID__)
+    (void)hostEnv;
+    char value[PROP_VALUE_MAX] = {0};
+    __system_property_get(name, value);
+    return value;
+#else
+    (void)name;
+    const char* v = getenv(hostEnv);
+    return v ? v : "";
+#endif
+}
+}  // namespace
+
+DeviceInfo DetectDevice() {
+    DeviceInfo d;
+    d.model = Prop("ro.product.model", "NCS_HOST_MODEL");
+    d.codename = Prop("ro.product.device", "NCS_HOST_DEVICE");
+    d.androidRelease = Prop("ro.build.version.release", "NCS_HOST_ANDROID");
+    d.sdk = Prop("ro.build.version.sdk", "NCS_HOST_SDK");
+
+    struct Known { const char* codename; const char* model; const char* name; bool supported; };
+    static const Known kKnown[] = {
+        {"monterey", "Quest", "Meta Quest (1st gen)", false},
+        {"hollywood", "Quest 2", "Meta Quest 2", true},
+        {"seacliff", "Quest Pro", "Meta Quest Pro", true},
+        {"eureka", "Quest 3", "Meta Quest 3", true},
+        {"panther", "Quest 3S", "Meta Quest 3S", true},
+    };
+    // Codename first: "Quest 3" is a prefix of "Quest 3S", so exact matches only.
+    for (const auto& k : kKnown)
+        if (d.codename == k.codename) { d.displayName = k.name; d.known = true; d.supported = k.supported; return d; }
+    for (const auto& k : kKnown)
+        if (d.model == k.model) { d.displayName = k.name; d.known = true; d.supported = k.supported; return d; }
+    d.displayName = d.model.empty() ? "Unknown device" : "Meta " + d.model;
+    return d;
+}
 
 std::string CurrentPackageName() {
 #if defined(NCS_HOST_TEST)

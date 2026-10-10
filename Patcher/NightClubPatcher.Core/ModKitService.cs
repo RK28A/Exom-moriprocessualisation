@@ -16,6 +16,10 @@ public sealed class KitStatus
     public DeviceState Device { get; set; } = DeviceState.NoAdb;
     public string? DeviceSerial { get; set; }
     public string? DeviceModel { get; set; }
+    public List<AdbDevice> Devices { get; set; } = new();
+    public QuestModelInfo? Headset { get; set; }
+    public DeviceCompatibility? HeadsetCompatibility { get; set; }
+    public string? AndroidVersion { get; set; }
     public InstalledGameState? Installed { get; set; }
     public OriginalBackup? Backup { get; set; }
     public ApkAnalysis? BackupAnalysis { get; set; }
@@ -28,7 +32,8 @@ public sealed class KitStatus
 
     public string DeviceText => Device switch
     {
-        DeviceState.Connected => $"Connected ({DeviceModel ?? DeviceSerial})",
+        DeviceState.Connected => $"Connected - {Headset?.DisplayName ?? DeviceModel ?? "?"} ({DeviceSerial})",
+        DeviceState.MultipleDevices => $"{Devices.Count(d => d.Ready)} headsets connected - choose one",
         DeviceState.Unauthorized => "Unauthorized - accept the USB debugging prompt in the headset",
         DeviceState.Offline => "Offline",
         DeviceState.NoDevice => "Not connected",
@@ -36,6 +41,8 @@ public sealed class KitStatus
         _ => Device.ToString(),
     };
 }
+
+public enum DevicePurpose { PatchOnly, PatchAndInstall, Operation }
 
 /// <summary>
 /// High-level workflows shared by the CLI and the GUI. All operations are synchronous and
@@ -109,9 +116,160 @@ public sealed class ModKitService
             DeviceState.NoDevice => "No Quest connected. Connect it by USB and enable developer mode.",
             DeviceState.Unauthorized => "Quest is unauthorized. Put on the headset and accept 'Allow USB debugging'.",
             DeviceState.Offline => "Quest is offline. Reconnect the cable or restart adb.",
-            _ => $"Quest connected: {dev?.Serial}",
+            DeviceState.MultipleDevices => "Several devices are connected. Select one (GUI device list, --device <serial>).",
+            _ => $"Quest connected: {dev?.Headset.DisplayName} ({dev?.Serial})",
         };
         return state == DeviceState.Connected;
+    }
+
+    /// <summary>Like ConnectDevice, but asks the user when several devices are connected.</summary>
+    public bool ConnectDevice(IUserInteraction ui, out string message)
+    {
+        if (ConnectDevice(out message)) return true;
+        if (Adb.Available && Adb.DetectDevice(out _) == DeviceState.MultipleDevices && SelectDevice(ui, DevicePurpose.Operation))
+            return ConnectDevice(out message);
+        return false;
+    }
+
+    /// <summary>Set when the device was given explicitly (CLI --device): no list prompt, checks still run.</summary>
+    public bool DeviceLockedByUser { get; set; }
+
+    private bool AutoSelectDevice(IUserInteraction ui, DevicePurpose purpose)
+    {
+        var state = Adb.Available ? Adb.DetectDevice(out _) : DeviceState.NoAdb;
+        if (state != DeviceState.Connected)
+        {
+            if (purpose == DevicePurpose.PatchOnly && Backups.Latest() != null)
+            {
+                Log.Info("No headset selected: patch will be built from the existing backup only.");
+                return true;
+            }
+            Log.Error(state == DeviceState.MultipleDevices
+                ? "Several devices are connected: pass --device <serial> (see --list-devices)."
+                : "No usable headset: " + state);
+            return false;
+        }
+        var (headset, compat) = CheckSelectedHeadset();
+        Log.Info($"Using device: {headset.DisplayName} ({Adb.Serial})");
+        foreach (var w in compat.Warnings) Log.Warn(w);
+        if (!compat.Supported) { Log.Error($"{headset.DisplayName} is not supported."); return false; }
+        if (compat.Warnings.Count > 0 && ui is not NonInteractive && purpose != DevicePurpose.Operation &&
+            !ui.Confirm("Headset compatibility", string.Join(Environment.NewLine, compat.Warnings) + Environment.NewLine + "Continue?", "Continue"))
+            return false;
+        return true;
+    }
+
+    public List<AdbDevice> ListDevices() => Adb.Available ? Adb.Devices() : new List<AdbDevice>();
+
+    /// <summary>Selects a device programmatically (GUI list, CLI --device).</summary>
+    public bool UseDevice(string? serial)
+    {
+        Adb.PreferredSerial = string.IsNullOrWhiteSpace(serial) ? null : serial;
+        if (serial == null) return true;
+        var found = ListDevices().Any(d => d.Serial == serial);
+        if (!found) Log.Warn($"Device {serial} is not connected.");
+        return found;
+    }
+
+    /// <summary>Identifies the selected headset and checks it against the game manifest.</summary>
+    public (QuestModelInfo headset, DeviceCompatibility compat) CheckSelectedHeadset()
+    {
+        var headset = Adb.IdentifyHeadset();
+        var manifest = SafeBackupAnalysis()?.Manifest.SupportedDevices;
+        return (headset, QuestDevices.Check(headset, manifest));
+    }
+
+    private ApkAnalysis? SafeBackupAnalysis()
+    {
+        var b = Backups.Latest();
+        if (b == null) return null;
+        try { return Analyze(b.ApkPath); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Device choice shown before patching (and whenever several headsets are connected).
+    /// Lists every adb device with its headset model and compatibility, then checks the choice.
+    /// Returns false when the user cancels or the device cannot be used.
+    /// </summary>
+    public bool SelectDevice(IUserInteraction ui, DevicePurpose purpose)
+    {
+        if (ui is NonInteractive || (DeviceLockedByUser && Adb.PreferredSerial != null))
+            return AutoSelectDevice(ui, purpose);
+        if (!Adb.Available)
+        {
+            if (purpose == DevicePurpose.PatchOnly && Backups.Latest() != null) return true;
+            ui.Notify("No adb", "adb was not found. Put adb.exe in Tools/adb/ or install Android platform-tools.");
+            return false;
+        }
+
+        var manifest = SafeBackupAnalysis()?.Manifest.SupportedDevices;
+        var devices = Adb.Devices();
+        var options = new List<string> { "Cancel" };
+        foreach (var d in devices)
+        {
+            var c = QuestDevices.Check(d.Headset, manifest);
+            options.Add(d.Label + (d.Ready ? $"  -  {c.Summary}" : ""));
+        }
+        var offlineIndex = -1;
+        if (purpose == DevicePurpose.PatchOnly && Backups.Latest() != null)
+        {
+            offlineIndex = options.Count;
+            options.Add("No headset - only build the patched APK from the existing backup");
+        }
+
+        if (devices.Count == 0 && offlineIndex < 0)
+        {
+            ui.Notify("No headset", "No Meta Quest detected. Connect it by USB (developer mode on) and try again.");
+            return false;
+        }
+
+        var title = purpose == DevicePurpose.Operation ? "Choose a headset" : "Choose the headset to patch for";
+        var message = purpose == DevicePurpose.Operation
+            ? "Several devices are connected. Which one should be used?"
+            : "Select the Meta Quest that holds NightClub Simulator." + Environment.NewLine +
+              "The original APK is backed up from it and the patched game is installed on it." + Environment.NewLine +
+              "Supported: Meta Quest 2, Quest Pro, Quest 3, Quest 3S (same arm64 build for all).";
+        var choice = ui.Choose(title, message, options);
+        if (choice <= 0) { Log.Info("Device selection cancelled."); return false; }
+        if (choice == offlineIndex)
+        {
+            Adb.PreferredSerial = null;
+            Log.Info("No headset selected: patch will be built from the existing backup only.");
+            return true;
+        }
+
+        var dev = devices[choice - 1];
+        if (!dev.Ready)
+        {
+            ui.Notify("Device not ready", dev.State == "unauthorized"
+                ? "Put on the headset and accept 'Allow USB debugging', then try again."
+                : $"Device {dev.Serial} is {dev.State}. Reconnect the cable or restart adb.");
+            return false;
+        }
+
+        Adb.PreferredSerial = dev.Serial;
+        if (!ConnectDevice(out var msg)) { ui.Notify("Device", msg); return false; }
+
+        var (headset, compat) = CheckSelectedHeadset();
+        var android = $"Android {Adb.GetProp("ro.build.version.release")} (SDK {Adb.GetProp("ro.build.version.sdk")}), {Adb.GetProp("ro.build.display.id")}";
+        Log.Info($"Selected device: {headset.DisplayName} [{Adb.GetProp("ro.product.device")}] {dev.Serial} - {android}");
+        foreach (var w in compat.Warnings) Log.Warn(w);
+
+        if (!compat.Supported)
+        {
+            ui.Notify("Unsupported device", $"{headset.DisplayName} cannot run NightClub Simulator." +
+                                            (headset.Note != null ? Environment.NewLine + headset.Note : ""));
+            Adb.PreferredSerial = null;
+            return false;
+        }
+        if (compat.Warnings.Count > 0 && purpose != DevicePurpose.Operation &&
+            !ui.Confirm("Headset compatibility", string.Join(Environment.NewLine + Environment.NewLine, compat.Warnings) +
+                                                  Environment.NewLine + Environment.NewLine + "Continue with this headset?", "Continue"))
+        {
+            return false;
+        }
+        return true;
     }
 
     public KitStatus Detect(bool analyzeBackup = true)
@@ -120,10 +278,13 @@ public sealed class ModKitService
         s.Device = Adb.DetectDevice(out var dev);
         s.DeviceSerial = dev?.Serial;
         s.LoaderPath = Paths.FindLoader();
+        if (Adb.Available) s.Devices = Adb.Devices();
 
         if (s.Device == DeviceState.Connected)
         {
             s.DeviceModel = Adb.GetProp("ro.product.model");
+            s.Headset = Adb.IdentifyHeadset();
+            s.AndroidVersion = $"Android {Adb.GetProp("ro.build.version.release")} (SDK {Adb.GetProp("ro.build.version.sdk")})";
             OriginalBackup? hint = Backups.Latest();
             s.Installed = DeviceGameState.Read(Adb, hint?.Metadata?.SignerJavaHash, ModKitJavaHash);
             s.SafeMode = Adb.RemoteExists(GameConstants.DeviceSafeModeFlag);
@@ -139,6 +300,11 @@ public sealed class ModKitService
             {
                 s.BackupAnalysis = Analyze(s.Backup.ApkPath);
                 s.Compatibility = Profiles.Evaluate(s.BackupAnalysis);
+                if (s.Headset != null)
+                {
+                    s.HeadsetCompatibility = QuestDevices.Check(s.Headset, s.BackupAnalysis.Manifest.SupportedDevices);
+                    s.Warnings.AddRange(s.HeadsetCompatibility.Warnings);
+                }
             }
             catch (Exception ex)
             {
@@ -216,8 +382,18 @@ public sealed class ModKitService
 
     // ------------------------------------------------------------------ patch / install
 
-    public PatchResult Patch(PatchOptions options)
+    /// <summary>PATCH GAME. With a UI, the device choice is shown first.</summary>
+    public PatchResult Patch(PatchOptions options, IUserInteraction? ui = null)
     {
+        if (ui != null && !SelectDevice(ui, DevicePurpose.PatchOnly))
+            return PatchResult.Fail("Patch cancelled: no device selected.");
+        return PatchSelected(options);
+    }
+
+    private PatchResult PatchSelected(PatchOptions options)
+    {
+        if (Adb.Available && Adb.DetectDevice(out var dev) == DeviceState.Connected)
+            options.TargetDevice = $"{Adb.IdentifyHeadset().DisplayName} ({dev?.Serial})";
         var backup = EnsureBackup(out var msg);
         Log.Info(msg);
         if (backup == null) return PatchResult.Fail("No original backup available. Connect the Quest with the original game installed.");
@@ -226,7 +402,7 @@ public sealed class ModKitService
 
     public InstallResult InstallCurrent(IUserInteraction ui, bool previous = false)
     {
-        if (!ConnectDevice(out var msg)) return new InstallResult(false, msg);
+        if (!ConnectDevice(ui, out var msg)) return new InstallResult(false, msg);
         var backup = Backups.Latest();
         var vn = backup?.Metadata?.VersionName;
         var vc = backup?.Metadata?.VersionCode;
@@ -239,7 +415,10 @@ public sealed class ModKitService
 
     public (PatchResult patch, InstallResult? install) PatchAndInstall(PatchOptions options, IUserInteraction ui, bool launch)
     {
-        var p = Patch(options);
+        if (!SelectDevice(ui, DevicePurpose.PatchAndInstall))
+            return (PatchResult.Fail("Patch + install cancelled: no headset selected."), null);
+        if (!ConnectDevice(out var connectMsg)) return (PatchResult.Fail(connectMsg), null);
+        var p = PatchSelected(options);
         if (!p.Ok || p.OutputApk == null) return (p, null);
         if (!ConnectDevice(out var msg)) return (p, new InstallResult(false, msg));
         var backup = Backups.Latest();
@@ -256,7 +435,7 @@ public sealed class ModKitService
         string? source = current;
 
         // Prefer the APK that is actually installed if it is a ModKit build.
-        if (ConnectDevice(out _))
+        if (ConnectDevice(ui, out _))
         {
             var paths = Adb.PackagePaths(GameConstants.PackageName);
             if (paths.Count > 0)
@@ -283,7 +462,7 @@ public sealed class ModKitService
 
     public RestoreResult RestoreOriginal(IUserInteraction ui, ModFilesPolicy policy = ModFilesPolicy.Ask)
     {
-        if (!ConnectDevice(out var msg)) return new RestoreResult(false, msg, Array.Empty<string>());
+        if (!ConnectDevice(ui, out var msg)) return new RestoreResult(false, msg, Array.Empty<string>());
         OriginalBackup? backup = null;
         if (Adb.IsPackageInstalled(GameConstants.PackageName))
         {
@@ -297,7 +476,7 @@ public sealed class ModKitService
 
     public RestoreResult EmergencyRestore(IUserInteraction ui, string? apkPath = null)
     {
-        if (!ConnectDevice(out var msg)) return new RestoreResult(false, msg, Array.Empty<string>());
+        if (!ConnectDevice(ui, out var msg)) return new RestoreResult(false, msg, Array.Empty<string>());
         return Restorer.Emergency(Adb, apkPath, ui);
     }
 
@@ -338,6 +517,8 @@ public sealed class ModKitService
         if (Adb.Available) r.Add("ADB version", CheckStatus.Info, Adb.Version());
 
         var state = Adb.Available ? Adb.DetectDevice(out var dev) : DeviceState.NoAdb;
+        if (Adb.Available)
+            foreach (var d in Adb.Devices()) r.Add("adb device", CheckStatus.Info, d.Label);
         r.Add("Quest connected", state == DeviceState.Connected ? CheckStatus.Pass : CheckStatus.Fail, state.ToString());
         r.Add("Authorization", state switch
             {
@@ -356,7 +537,12 @@ public sealed class ModKitService
         var backup = Backups.Latest();
         if (state == DeviceState.Connected)
         {
-            r.Add("Device model", CheckStatus.Info, $"{Adb.GetProp("ro.product.model")} / Android {Adb.GetProp("ro.build.version.release")} / {Adb.GetProp("ro.build.display.id")}");
+            var headset = Adb.IdentifyHeadset();
+            var headsetCompat = QuestDevices.Check(headset, SafeBackupAnalysis()?.Manifest.SupportedDevices);
+            r.Add("Headset", headsetCompat.Supported ? (headsetCompat.Warnings.Count == 0 ? CheckStatus.Pass : CheckStatus.Warn) : CheckStatus.Fail,
+                $"{headset.DisplayName} [{Adb.GetProp("ro.product.device")}] - {headsetCompat.Summary}");
+            foreach (var w in headsetCompat.Warnings) r.Add("Headset note", CheckStatus.Warn, w);
+            r.Add("Device build", CheckStatus.Info, $"Android {Adb.GetProp("ro.build.version.release")} (SDK {Adb.GetProp("ro.build.version.sdk")}) / {Adb.GetProp("ro.build.display.id")}");
             installed = DeviceGameState.Read(Adb, backup?.Metadata?.SignerJavaHash, ModKitJavaHash);
             r.Add("Package installed", installed.Installed ? CheckStatus.Pass : CheckStatus.Fail, GameConstants.PackageName);
             if (installed.Installed)

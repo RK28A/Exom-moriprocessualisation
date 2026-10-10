@@ -15,6 +15,10 @@ public sealed class ManifestInfo
     public List<string> Permissions { get; } = new();
     public List<string> Features { get; } = new();
     public List<string> MetaDataNames { get; } = new();
+    public Dictionary<string, string> MetaData { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Value of com.oculus.supportedDevices, e.g. "quest2|questpro|quest3|quest3s".</summary>
+    public string? SupportedDevices => MetaData.TryGetValue("com.oculus.supportedDevices", out var v) ? v : null;
     public List<string> Activities { get; } = new();
     public List<string> AllStrings { get; } = new();
 }
@@ -33,6 +37,7 @@ public static class AxmlManifest
     private const uint AttrExtractNativeLibs = 0x010104ea;
     private const uint AttrDebuggable = 0x0101000f;
     private const uint AttrName = 0x01010003;
+    private const uint AttrValue = 0x01010024;
 
     private const byte TypeReference = 0x01, TypeString = 0x03, TypeIntDec = 0x10, TypeIntHex = 0x11, TypeBool = 0x12;
 
@@ -160,6 +165,12 @@ public static class AxmlManifest
                 break;
             case "meta-data":
                 AddName(info.MetaDataNames);
+                var key = Get(AttrName, "name", out _, out _);
+                if (!string.IsNullOrEmpty(key) && Has(AttrValue, "value"))
+                {
+                    var str = Get(AttrValue, "value", out var raw, out var type);
+                    info.MetaData[key] = str ?? (type == TypeBool ? (raw != 0).ToString().ToLowerInvariant() : raw.ToString());
+                }
                 break;
             case "activity":
             case "activity-alias":

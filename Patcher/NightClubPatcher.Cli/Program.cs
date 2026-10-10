@@ -37,6 +37,11 @@ internal static class Program
           --elf-add-needed <in.so> <lib> <out.so>   Developer: add a DT_NEEDED entry
           --tools                      Show located external tools
 
+        Devices (Meta Quest 2 / Quest Pro / Quest 3 / Quest 3S)
+          --list-devices               List connected devices with headset model and compatibility
+          --device <serial>            Use this device (skips the device prompt; see --list-devices)
+                                       Without --device, --patch and --patch-install ask which headset to use.
+
         Options
           --allow-unverified           Allow patching builds whose fingerprints are not verified
           --no-mods                    Do not embed libncsmod_*.so into the APK
@@ -70,6 +75,14 @@ internal static class Program
             Console.ResetColor();
         };
         IUserInteraction ui = args.Contains("--non-interactive") ? new NonInteractive(svc.Log) : new ConsoleInteraction();
+
+        var serial = Value(args, "--device");
+        if (args.Contains("--device"))
+        {
+            if (serial == null) { Console.WriteLine("Usage: --device <serial>  (see --list-devices)"); return 1; }
+            if (!svc.UseDevice(serial)) return 2;
+            svc.DeviceLockedByUser = true;
+        }
 
         try
         {
@@ -110,9 +123,12 @@ internal static class Program
                 return r.Outcome is Core.Backup.BackupOutcome.Created or Core.Backup.BackupOutcome.AlreadyExists ? 0 : 2;
             }
 
+            case "--list-devices":
+                return ListDevices(svc);
+
             case "--patch":
             {
-                var r = svc.Patch(Options(args));
+                var r = svc.Patch(Options(args), ui);
                 Report(svc, r.Ok, r.Message + (r.OutputApk != null ? Environment.NewLine + r.OutputApk : ""));
                 return r.Ok ? 0 : 2;
             }
@@ -244,6 +260,26 @@ internal static class Program
         }
     }
 
+    private static int ListDevices(ModKitService svc)
+    {
+        var devices = svc.ListDevices();
+        if (devices.Count == 0)
+        {
+            Console.WriteLine(svc.Adb.Available ? "No device connected." : "adb not found.");
+            return 2;
+        }
+        string? manifest = null;
+        var b = svc.Backups.Latest();
+        if (b != null) { try { manifest = svc.Analyze(b.ApkPath).Manifest.SupportedDevices; } catch { /* ignore */ } }
+        foreach (var d in devices)
+        {
+            var c = Core.Adb.QuestDevices.Check(d.Headset, manifest);
+            Console.WriteLine($"{d.Serial,-28} {d.State,-13} {d.Headset.DisplayName,-24} {(d.Ready ? c.Summary : "")}");
+            foreach (var w in c.Warnings) Console.WriteLine("    ! " + w);
+        }
+        return 0;
+    }
+
     private static void Report(ModKitService svc, bool ok, string message)
     {
         if (ok) svc.Log.Success(message);
@@ -257,6 +293,10 @@ internal static class Program
         Console.WriteLine("      NightClub Simulator Mod Patcher");
         Console.WriteLine(new string('-', 50));
         Console.WriteLine($"Quest:                 {s.DeviceText}");
+        if (s.Headset != null)
+            Console.WriteLine($"Headset:               {s.Headset.DisplayName} - {s.HeadsetCompatibility?.Summary ?? (s.Headset.Supported ? "supported" : "not supported")}, {s.AndroidVersion}");
+        if (s.Devices.Count > 1)
+            foreach (var d in s.Devices) Console.WriteLine($"  device:              {d.Label}");
         Console.WriteLine($"Game:                  {(s.Installed?.Installed == true ? "Detected" : "Not detected")}");
         Console.WriteLine($"Package:               {GameConstants.PackageName}");
         var a = s.BackupAnalysis;

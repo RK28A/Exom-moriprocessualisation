@@ -148,10 +148,13 @@ internal sealed class AxmlWriter
         return doc;
     }
 
-    public static byte[] Manifest(string package, string versionName, long versionCode, bool? extractNativeLibs = false, bool debuggable = false)
+    public const string DefaultSupportedDevices = "quest2|questpro|quest3|quest3s";
+
+    public static byte[] Manifest(string package, string versionName, long versionCode, bool? extractNativeLibs = false, bool debuggable = false,
+        string? supportedDevices = DefaultSupportedDevices)
     {
         var w = new AxmlWriter(("versionCode", 0x0101021b), ("versionName", 0x0101021c), ("extractNativeLibs", 0x010104ea),
-            ("name", 0x01010003), ("debuggable", 0x0101000f), ("minSdkVersion", 0x0101020c));
+            ("name", 0x01010003), ("debuggable", 0x0101000f), ("minSdkVersion", 0x0101020c), ("value", 0x01010024));
         const string android = "http://schemas.android.com/apk/res/android";
         w.Start("manifest",
             new Attr("versionCode", null, 0x10, (uint)versionCode, android),
@@ -167,6 +170,13 @@ internal sealed class AxmlWriter
         w.Start("application", appAttrs.ToArray());
         w.Start("meta-data", new Attr("name", "com.oculus.intent.category.VR", 0x03, 0, android));
         w.End("meta-data");
+        if (supportedDevices != null)
+        {
+            w.Start("meta-data",
+                new Attr("name", "com.oculus.supportedDevices", 0x03, 0, android),
+                new Attr("value", supportedDevices, 0x03, 0, android));
+            w.End("meta-data");
+        }
         w.Start("activity", new Attr("name", "com.unity3d.player.UnityPlayerGameActivity", 0x03, 0, android));
         w.End("activity");
         w.End("application");

@@ -46,6 +46,7 @@ struct LoaderState {
     std::string selfPath;
     std::string gameVersion = "unknown";
     std::string unityVersion = "unknown";
+    ncs::DeviceInfo device;
     bool safeMode = false;
     ncs::LoaderConfig config;
     ncs::PluginManager plugins;
@@ -177,6 +178,9 @@ void BuildHostApi() {
     g_host.setStaticField = HostSetStatic;
     g_host.unbox = HostUnbox;
     g_host.attachCurrentThread = HostAttach;
+    g_host.deviceName = g.device.displayName.c_str();
+    g_host.deviceCodename = g.device.codename.c_str();
+    g_host.deviceModel = g.device.model.c_str();
 }
 
 // ---------------------------------------------------------------------------- mod discovery
@@ -237,6 +241,11 @@ void* WorkerMain(void*) {
         return nullptr;
     }
     NCS_LOGI("[NCS] Package verified: %s", g.package.c_str());
+    g.device = ncs::DetectDevice();
+    NCS_LOGI("[NCS] Device: %s (%s / %s), Android %s (SDK %s)", g.device.displayName.c_str(), g.device.model.c_str(),
+             g.device.codename.c_str(), g.device.androidRelease.c_str(), g.device.sdk.c_str());
+    if (!g.device.known) NCS_LOGW("[NCS] Unrecognised headset - continuing (all Quests share the arm64 build)");
+    else if (!g.device.supported) NCS_LOGW("[NCS] %s is not a supported headset", g.device.displayName.c_str());
     g.selfPath = ncs::SelfLibraryPath();
     NCS_LOGI("[NCS] Loader path: %s", g.selfPath.c_str());
 

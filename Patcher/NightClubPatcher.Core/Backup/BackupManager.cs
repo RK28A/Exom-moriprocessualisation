@@ -17,6 +17,7 @@ public sealed class BackupMetadata
     public string? SignerJavaHash { get; set; }
     public string Source { get; set; } = "Quest";
     public string? DeviceSerial { get; set; }
+    public string? DeviceModel { get; set; }
     public string? DeviceApkPath { get; set; }
     public List<SplitBackup> Splits { get; set; } = new();
     public Dictionary<string, string> FileHashes { get; set; } = new();
@@ -211,6 +212,7 @@ public sealed class BackupManager
                 SignerJavaHash = analysis.Signer?.JavaHash,
                 Source = "Quest",
                 DeviceSerial = adb.Serial,
+                DeviceModel = adb.IdentifyHeadset().DisplayName,
                 DeviceApkPath = paths[0],
                 FileHashes = new Dictionary<string, string>(analysis.FileHashes),
                 CreatedAt = DateTimeOffset.Now,

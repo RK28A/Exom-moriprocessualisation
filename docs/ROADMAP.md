@@ -8,6 +8,7 @@ Legend: ✅ implemented and covered by automated tests · 🟡 implemented, need
 | 1 | WPF application | 🟡 | `Patcher/NightClubPatcher.Gui` (built by CI on Windows) |
 | 2 | Detect ADB | ✅ | `Signing/ToolLocator`, `Adb/AdbClient` |
 | 3 | Detect Quest (`device` / `unauthorized` / `offline`) | 🟡 | `AdbClient.DetectDevice` |
+| 3b | Device choice + Quest 2 / Pro / 3 / 3S identification | ✅ parsing & checks / 🟡 device | `Adb/QuestDevices`, `ModKitService.SelectDevice`, loader `DetectDevice` |
 | 4 | Detect NightClub package | 🟡 | `pm list packages` |
 | 5 | Find installed APK path (+ splits) | 🟡 | `pm path` |
 | 6 | Pull original APK | 🟡 | `BackupManager.CreateFromDevice` |

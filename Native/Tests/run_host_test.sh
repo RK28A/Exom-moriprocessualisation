@@ -19,7 +19,9 @@ dotnet run --project "$ROOT/Patcher/NightClubPatcher.Cli" -c Release -- --elf-ne
 MODS_ROOT="$BUILD/NightClubMods"
 rm -rf "$MODS_ROOT"
 LOG="$BUILD/host_game.log"
+# Simulate a Meta Quest 3S (codename panther, Horizon OS / Android 14).
 NCS_HOST_PACKAGE=com.mandegames.NightClubSimulater NCS_MODS_ROOT="$MODS_ROOT" \
+  NCS_HOST_MODEL="Quest 3S" NCS_HOST_DEVICE=panther NCS_HOST_ANDROID=14 NCS_HOST_SDK=34 \
   LD_LIBRARY_PATH="$OUT" "$OUT/host_game" 2>&1 | tee "$LOG"
 
 expect() {
@@ -45,6 +47,8 @@ expect "STAGE 08 Mods loaded"
 expect "NCSLoader started successfully"
 expect "---- NCS Debug Overlay ----"
 expect "[fake libmain] constructor"
+expect "Device: Meta Quest 3S (Quest 3S / panther), Android 14 (SDK 34)"
+expect "Device   : Meta Quest 3S"
 test -f "$MODS_ROOT/Logs/latest.log" && echo "PASS  latest.log written" || { echo "FAIL  latest.log"; FAILED=1; }
 test -f "$MODS_ROOT/Config/config.json" && echo "PASS  default config.json created" || { echo "FAIL  config.json"; FAILED=1; }
 
@@ -54,6 +58,12 @@ LOG2="$BUILD/host_game_safe.log"
 NCS_HOST_PACKAGE=com.mandegames.NightClubSimulater NCS_MODS_ROOT="$MODS_ROOT" \
   LD_LIBRARY_PATH="$OUT" timeout 20 "$OUT/host_game" >"$LOG2" 2>&1 || true
 if grep -q "SAFE MODE" "$LOG2" && ! grep -q "Mod loaded" "$LOG2"; then echo "PASS  safe mode"; else echo "FAIL  safe mode"; FAILED=1; fi
+
+# Quest 3 (eureka) must not be mistaken for a Quest 3S.
+LOG4="$BUILD/host_game_quest3.log"
+NCS_HOST_PACKAGE=com.mandegames.NightClubSimulater NCS_MODS_ROOT="$MODS_ROOT" NCS_HOST_MODEL="Quest 3" NCS_HOST_DEVICE=eureka \
+  LD_LIBRARY_PATH="$OUT" timeout 20 "$OUT/host_game" >"$LOG4" 2>&1 || true
+if grep -q "Device: Meta Quest 3 (Quest 3 / eureka)" "$LOG4"; then echo "PASS  Quest 3 identified"; else echo "FAIL  Quest 3"; FAILED=1; fi
 
 # Wrong package: loader must stay idle.
 LOG3="$BUILD/host_game_wrongpkg.log"

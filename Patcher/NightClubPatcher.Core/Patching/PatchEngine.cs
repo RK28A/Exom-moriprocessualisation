@@ -22,6 +22,9 @@ public sealed class PatchOptions
 
     public string? LoaderPath { get; init; }
     public IReadOnlyList<string> ExtraMods { get; init; } = Array.Empty<string>();
+
+    /// <summary>Headset chosen before patching, recorded in build.json.</summary>
+    public string? TargetDevice { get; set; }
 }
 
 public sealed record PatchResult(bool Ok, string Message, string? OutputApk, IReadOnlyList<string> Splits, string? WorkspaceRoot = null)
@@ -115,6 +118,7 @@ public sealed class PatchEngine
                 Mode = "FastPatch",
                 OriginalSha256 = original.ApkSha256,
                 LoaderSha256 = loaderSha,
+                TargetDevice = options.TargetDevice,
                 InjectedLibraries = injected,
                 CreatedAt = DateTimeOffset.Now,
             }, splits);

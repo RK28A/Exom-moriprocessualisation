@@ -51,11 +51,21 @@ public static class ChoiceDialog
             Foreground = (Brush)Application.Current.Resources["Fg"],
             Margin = new Thickness(0, 0, 0, 16),
         });
-        var buttons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+        // Long options (e.g. device labels) are listed vertically, short ones as a button row.
+        var vertical = options.Any(o => o.Length > 32);
+        Panel buttons = vertical
+            ? new StackPanel()
+            : new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
         for (var i = 0; i < options.Count; i++)
         {
             var index = i;
-            var b = new Button { Content = options[i], Margin = new Thickness(6, 0, 0, 0), MinWidth = 90 };
+            var b = new Button
+            {
+                Content = options[i],
+                Margin = vertical ? new Thickness(0, 3, 0, 3) : new Thickness(6, 0, 0, 0),
+                MinWidth = 90,
+                HorizontalContentAlignment = vertical ? HorizontalAlignment.Left : HorizontalAlignment.Center,
+            };
             if (i == 0) b.IsCancel = true;
             b.Click += (_, _) => { result = index; win.Close(); };
             buttons.Children.Add(b);

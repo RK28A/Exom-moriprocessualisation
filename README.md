@@ -7,7 +7,7 @@ Dedicated Windows patcher and native modding framework for **NightClub Simulator
 | Package | `com.mandegames.NightClubSimulater` (the only package the toolkit will touch) |
 | Supported build | 1.1.0 (versionCode 212) |
 | Engine | Unity 6000.2.2f1, IL2CPP, arm64-v8a |
-| Platform | Meta Quest 2+ / Meta Horizon OS, Oculus XR / Meta XR |
+| Headsets | Meta Quest 2, Quest Pro, **Quest 3**, **Quest 3S** (Horizon OS, Oculus XR / Meta XR) |
 
 > **Main design rule:** the original game backup must always stay recoverable. Every operation
 > leaves you with `original.apk`, `patched-current.apk`, `patched-previous.apk`, logs, and a
@@ -40,6 +40,37 @@ Quest ──adb pull──► Backups/…/original.apk   (immutable, read-only, 
 On the device the loader runs **before Unity**: it logs, starts a worker thread, waits for
 `libunity.so` then `libil2cpp.so`, resolves the IL2CPP API with `dlsym`, waits for the runtime,
 enumerates assemblies and loads mods. **No hooks, no game code changes.**
+
+---
+
+## Supported headsets & device choice
+
+| Headset | Codename | Status |
+|---|---|---|
+| Meta Quest 2 | `hollywood` | supported |
+| Meta Quest Pro | `seacliff` | supported |
+| Meta Quest 3 | `eureka` | supported |
+| Meta Quest 3S (incl. Xbox Edition) | `panther` | supported |
+| Meta Quest (1st gen) | `monterey` | refused (not supported by Unity 6 / current Meta XR) |
+| unknown future Quest | — | allowed with a warning (same arm64 build) |
+
+All supported headsets use the **same patched APK** (arm64-v8a). The headset matters for:
+
+* **Which device is used.** Before **PATCH GAME** / **PATCH + INSTALL** the patcher lists every
+  adb device (model, serial, USB/Wi-Fi, authorization state, compatibility) and asks which one to
+  use; the original APK is backed up from it and the patched game installed on it. The status panel
+  also has a headset selector. CLI: `--list-devices`, `--device <serial>`.
+  *PATCH GAME* can also run with no headset, building from an existing backup.
+* **Compatibility check.** The headset is matched against the game's
+  `com.oculus.supportedDevices` manifest entry. If the developer does not list your headset you get
+  a warning and must confirm; sideloading usually still works.
+* **Storage on newer Horizon OS (Quest 3 / 3S).** Shared storage is scoped: when
+  `/sdcard/NightClubMods` is not writable by the game, the loader automatically uses
+  `/sdcard/Android/data/com.mandegames.NightClubSimulater/files/NightClubMods` (Safe Mode flags are
+  written to both).
+* The loader logs the headset (`[NCS] Device: Meta Quest 3S (Quest 3S / panther), Android 14 (SDK 34)`)
+  and exposes it to mods (`NCS::Game::GetDeviceName()`), and `backup.json` / `build.json` record the
+  source and target headset.
 
 ---
 
@@ -136,6 +167,8 @@ NightClubPatcher.exe --logcat              filtered logcat
 NightClubPatcher.exe --safe-mode on|off
 NightClubPatcher.exe --install-previous    crash protection: go back one modded build
 NightClubPatcher.exe --pin-fingerprints | --analyze <apk> | --import-backup <apk> | --tools
+NightClubPatcher.exe --list-devices        headsets connected (model, serial, compatibility)
+NightClubPatcher.exe --device <serial> --patch-install   use that headset, no prompt
 ```
 
 Options: `--allow-unverified`, `--no-mods`, `--loader <path>`, `--mods keep|disable|delete`,

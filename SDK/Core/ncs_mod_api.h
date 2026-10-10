@@ -19,6 +19,7 @@
 #ifndef NCS_MOD_API_H
 #define NCS_MOD_API_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -95,7 +96,16 @@ typedef struct NCSHostApi {
     void (*setStaticField)(NCSField* field, void* value);
     void* (*unbox)(NCSObject* boxed);
     int (*attachCurrentThread)(void);
+
+    /* ---- appended in loader 0.2.0 (still API 1: check structSize before use) ---- */
+    const char* deviceName;      /* "Meta Quest 3S" */
+    const char* deviceCodename;  /* ro.product.device: hollywood / seacliff / eureka / panther */
+    const char* deviceModel;     /* ro.product.model:  "Quest 2" / "Quest Pro" / "Quest 3" / "Quest 3S" */
 } NCSHostApi;
+
+/* True when the running loader provides the field (older loaders have a smaller struct). */
+#define NCS_HOST_HAS(api, field) \
+    ((api) && (api)->structSize >= offsetof(NCSHostApi, field) + sizeof(((NCSHostApi*)0)->field))
 
 typedef const NCSModInfo* (*NCSMod_GetInfo_t)(void);
 typedef int (*NCSMod_Load_t)(const NCSHostApi* api);
