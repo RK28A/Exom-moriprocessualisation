@@ -1,0 +1,31 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+
+# Native builds
+Native/build*/
+Native/out/
+Payload/
+
+# Never commit user data, game files or keys
+Backups/*
+!Backups/.gitkeep
+Builds/*
+!Builds/.gitkeep
+Cache/*
+!Cache/.gitkeep
+Logs/*
+!Logs/.gitkeep
+Keys/*
+!Keys/README.md
+*.apk
+*.keystore
+
+# Tool binaries are user supplied
+Tools/**/*.exe
+Tools/**/*.dll
+Tools/**/*.jar
+Tools/jdk/

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>NightClubPatcher.Gui</AssemblyName>
+    <RootNamespace>NightClubPatcher.Gui</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NightClubPatcher.Core\NightClubPatcher.Core.csproj" />
+  </ItemGroup>
+  <!-- Ship version profiles (and the native payload when it has been built) next to the executable. -->
+  <ItemGroup>
+    <None Include="..\..\Versions\*.json" Link="Versions\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Native\out\arm64-v8a\*.so" Link="Payload\arm64-v8a\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
