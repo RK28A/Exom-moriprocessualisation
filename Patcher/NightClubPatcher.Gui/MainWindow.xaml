@@ -1,0 +1,111 @@
+<Window x:Class="NightClubPatcher.Gui.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="NightClub Simulator Mod Patcher" Width="980" Height="760" MinWidth="820" MinHeight="600"
+        Background="{StaticResource Bg}" WindowStartupLocation="CenterScreen">
+  <Grid Margin="16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="200"/>
+    </Grid.RowDefinitions>
+
+    <StackPanel Grid.Row="0" Margin="0,0,0,12">
+      <TextBlock Text="NightClub Simulator Mod Patcher" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Fg}"/>
+      <TextBlock Text="NightClubModKit - com.mandegames.NightClubSimulater only" Foreground="{StaticResource Muted}"/>
+    </StackPanel>
+
+    <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="300"/>
+      </Grid.ColumnDefinitions>
+
+      <Border Grid.Column="0" Background="{StaticResource Panel}" CornerRadius="8" Padding="16" Margin="0,0,12,0">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+              </Grid.RowDefinitions>
+              <TextBlock Grid.Row="0" Style="{StaticResource Label}" Text="Quest"/>
+              <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Value}" x:Name="QuestText" Text="..."/>
+              <TextBlock Grid.Row="1" Style="{StaticResource Label}" Text="Game"/>
+              <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" x:Name="GameText" Text="..."/>
+              <TextBlock Grid.Row="2" Style="{StaticResource Label}" Text="Package"/>
+              <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" Text="com.mandegames.NightClubSimulater"/>
+              <TextBlock Grid.Row="3" Style="{StaticResource Label}" Text="Version"/>
+              <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" x:Name="VersionText" Text="..."/>
+              <TextBlock Grid.Row="4" Style="{StaticResource Label}" Text="Version Code"/>
+              <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" x:Name="VersionCodeText" Text="..."/>
+              <TextBlock Grid.Row="5" Style="{StaticResource Label}" Text="Unity"/>
+              <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" x:Name="UnityText" Text="..."/>
+              <TextBlock Grid.Row="6" Style="{StaticResource Label}" Text="Architecture"/>
+              <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" x:Name="ArchText" Text="..."/>
+              <TextBlock Grid.Row="7" Style="{StaticResource Label}" Text="Backend"/>
+              <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource Value}" x:Name="BackendText" Text="..."/>
+              <TextBlock Grid.Row="8" Style="{StaticResource Label}" Text="XR"/>
+              <TextBlock Grid.Row="8" Grid.Column="1" Style="{StaticResource Value}" x:Name="XrText" Text="..."/>
+              <TextBlock Grid.Row="9" Style="{StaticResource Label}" Text="Original Backup"/>
+              <TextBlock Grid.Row="9" Grid.Column="1" Style="{StaticResource Value}" x:Name="BackupText" Text="..."/>
+              <TextBlock Grid.Row="10" Style="{StaticResource Label}" Text="Current Installation"/>
+              <TextBlock Grid.Row="10" Grid.Column="1" Style="{StaticResource Value}" x:Name="InstallText" Text="..."/>
+              <TextBlock Grid.Row="11" Style="{StaticResource Label}" Text="Loader"/>
+              <TextBlock Grid.Row="11" Grid.Column="1" Style="{StaticResource Value}" x:Name="LoaderText" Text="..."/>
+              <TextBlock Grid.Row="12" Style="{StaticResource Label}" Text="Patched builds"/>
+              <TextBlock Grid.Row="12" Grid.Column="1" Style="{StaticResource Value}" x:Name="BuildsText" Text="..."/>
+              <TextBlock Grid.Row="13" Style="{StaticResource Label}" Text="Compatibility"/>
+              <TextBlock Grid.Row="13" Grid.Column="1" Style="{StaticResource Value}" x:Name="CompatText" Text="..."/>
+              <TextBlock Grid.Row="14" Style="{StaticResource Label}" Text="Safe Mode"/>
+              <TextBlock Grid.Row="14" Grid.Column="1" Style="{StaticResource Value}" x:Name="SafeModeText" Text="..."/>
+            </Grid>
+            <TextBlock x:Name="WarningText" Foreground="#FFC857" TextWrapping="Wrap" Margin="0,12,0,0"/>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+
+      <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+        <StackPanel x:Name="Actions">
+          <Button Style="{StaticResource Primary}" Content="PATCH GAME" Click="Patch_Click"/>
+          <Button Style="{StaticResource Primary}" Content="PATCH + INSTALL" Click="PatchInstall_Click"/>
+          <CheckBox x:Name="LaunchAfterInstall" Content="Launch game after install" IsChecked="True"
+                    Foreground="{StaticResource Muted}" Margin="2,2,0,10"/>
+          <Button Style="{StaticResource Recovery}" Content="RESTORE ORIGINAL" Click="Restore_Click" Padding="10,14"/>
+          <Button Content="UNPATCH" Click="Unpatch_Click"/>
+          <Button Content="START IN SAFE MODE" Click="SafeMode_Click"/>
+          <Separator Margin="0,8" Background="#3E3557"/>
+          <Button Content="DIAGNOSE" Click="Diagnose_Click"/>
+          <Button Content="OPEN LOGS" Click="OpenLogs_Click"/>
+          <Button Content="OPEN LOGCAT" Click="Logcat_Click"/>
+          <Button Content="ADVANCED" Click="Advanced_Click"/>
+          <Separator Margin="0,8" Background="#3E3557"/>
+          <Button Content="BACKUP ORIGINAL NOW" Click="Backup_Click"/>
+          <Button Content="REFRESH" Click="Refresh_Click"/>
+          <Button Style="{StaticResource Danger}" Content="EMERGENCY RESTORE" Click="Emergency_Click"/>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+
+    <Border Grid.Row="2" Background="#0E0C14" CornerRadius="8" Margin="0,12,0,0" Padding="8">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <DockPanel>
+          <TextBlock x:Name="BusyText" DockPanel.Dock="Right" Foreground="{StaticResource Accent}"/>
+          <TextBlock Text="Log" Foreground="{StaticResource Muted}"/>
+        </DockPanel>
+        <TextBox Grid.Row="1" x:Name="LogBox" IsReadOnly="True" Background="Transparent" BorderThickness="0"
+                 Foreground="#CFC8E3" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto"/>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

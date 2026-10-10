@@ -1,0 +1,19 @@
+{
+  "package": "com.mandegames.NightClubSimulater",
+  "versionName": "1.1.0",
+  "versionCode": 212,
+  "unityVersion": "6000.2.2f1",
+  "architecture": "arm64-v8a",
+  "backend": "IL2CPP",
+  "xrRuntime": "Oculus XR / Meta XR",
+  "hashes": {
+    "libMain": null,
+    "libUnity": null,
+    "libIl2Cpp": null,
+    "globalMetadata": null
+  },
+  "originalApkSha256": null,
+  "originalSignerSha256": null,
+  "verified": false,
+  "notes": "File fingerprints are recorded from your own verified original backup with 'NightClubPatcher.exe --pin-fingerprints' (GUI: Advanced > Pin fingerprints). Until then automatic patching requires 'Allow unverified build'."
+}

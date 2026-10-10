@@ -1,0 +1,8 @@
+{
+  "id": "ncs.helloworld",
+  "name": "HelloWorld",
+  "author": "RK",
+  "version": "1.0.0",
+  "requiredApi": 1,
+  "library": "libncsmod_helloworld.so"
+}

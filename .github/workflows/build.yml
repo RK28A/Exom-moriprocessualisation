@@ -1,0 +1,60 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  native-android:
+    name: Native loader (Android NDK, arm64-v8a)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build libncsloader.so + mods
+        run: |
+          sudo apt-get install -y ninja-build
+          ./Native/build.sh "$ANDROID_NDK_LATEST_HOME"
+      - name: Check ELF
+        run: |
+          for f in Native/out/arm64-v8a/*.so; do
+            readelf -h "$f" | grep -q AArch64
+            readelf -d "$f" | grep NEEDED
+          done
+          readelf -Ws --dyn-syms Native/out/arm64-v8a/libncsmod_helloworld.so | grep -E "NCSMod_(GetInfo|Load)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NightClubModKit-native-arm64-v8a
+          path: Native/out/arm64-v8a/*.so
+
+  host-test:
+    name: Loader end-to-end host test + unit tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Unit tests
+        run: dotnet test Patcher/NightClubPatcher.Tests
+      - name: Host end-to-end test (patched libmain -> loader -> fake il2cpp -> mods)
+        run: ./Native/Tests/run_host_test.sh
+
+  windows:
+    name: Patcher (Windows, WPF + CLI)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet build NightClubModKit.sln -c Release
+      - run: dotnet test Patcher/NightClubPatcher.Tests -c Release --no-build
+      - name: Publish
+        run: |
+          dotnet publish Patcher/NightClubPatcher.Gui -c Release -r win-x64 --self-contained false -o publish
+          dotnet publish Patcher/NightClubPatcher.Cli -c Release -r win-x64 --self-contained false -o publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NightClubPatcher-win-x64
+          path: publish
