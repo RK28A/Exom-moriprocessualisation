@@ -102,9 +102,11 @@ inside `NightClubPatcher.Core` so the GUI and CLI share one implementation.
 ## Requirements (Windows)
 
 1. **.NET 8 SDK** (to build) or .NET 8 Desktop Runtime (to run a published build).
-2. **Android SDK pieces** — copy into `Tools/` or install the Android SDK (see `Tools/README.md`):
-   `adb`, `zipalign`, `apksigner.jar`.
-3. **JDK 17+** (`java`, `keytool`) — Android Studio's bundled JBR is detected automatically.
+2. **adb, zipalign, apksigner, Java 17** — **installed automatically.** On first start the app
+   detects what is missing and offers **Install tools**: Android platform-tools and the latest
+   stable build-tools are downloaded from Google's official SDK repository (SHA-1 verified, Android
+   SDK License), Java from the Microsoft Build of OpenJDK, all into `Tools/`.
+   CLI: `--install-tools`. An existing Android SDK / JDK / `PATH` install is used if present.
 4. **Android NDK r26+** to build the native loader.
 5. Quest in **developer mode**, USB debugging authorized.
 
@@ -121,6 +123,23 @@ dotnet test  Patcher\NightClubPatcher.Tests
 
 CI (`.github/workflows/build.yml`) builds the loader with the NDK, runs the unit tests and the
 host end-to-end test, and publishes the Windows GUI/CLI as artifacts.
+
+## The app
+
+* **Header** – live **ADB indicator**: green = adb running and a headset connected, amber = adb
+  OK but no headset / headset unauthorized (accept *Allow USB debugging* in the headset) / several
+  headsets, red = adb missing or adb server broken. Hover for adb path and version.
+  **Restart ADB** fixes most *offline* headsets; **Install tools** appears when something is missing.
+* **Headset is watched continuously** (`adb devices` every 3 s): plugging/unplugging a Quest or
+  accepting the USB-debugging prompt updates the status by itself.
+* **Cards** – Headset (model, serial, Android version, compatibility), NightClub Simulator
+  (installed / version / original or modded / loader), Engine (Unity, ARM64, IL2CPP, XR, build
+  verification), Backup & builds, Warnings.
+* **Activity panel** – every operation (patch, install, restore…) shows its **steps** with
+  ✓ / ✗ and a timer, and the full **colored log** live in the app (filter: all / steps / warnings),
+  with Copy, Save and Clear. Everything is also written to `Logs/patcher-YYYYMMDD.log`.
+
+CLI equivalents: `--check-adb` (binary, version, server, devices), `--restart-adb`.
 
 ## First run (the "absolute first test")
 

@@ -36,6 +36,9 @@ internal static class Program
           --elf-needed <so>            List DT_NEEDED of a shared library
           --elf-add-needed <in.so> <lib> <out.so>   Developer: add a DT_NEEDED entry
           --tools                      Show located external tools
+          --install-tools              Download missing adb / zipalign / apksigner / Java into Tools/
+          --check-adb                  Check adb (binary, version, server) and list devices
+          --restart-adb                Restart the adb server (fixes most "offline" devices)
 
         Devices (Meta Quest 2 / Quest Pro / Quest 3 / Quest 3S)
           --list-devices               List connected devices with headset model and compatibility
@@ -69,9 +72,10 @@ internal static class Program
                 LogLevel.Warn => ConsoleColor.Yellow,
                 LogLevel.Success => ConsoleColor.Green,
                 LogLevel.Debug => ConsoleColor.DarkGray,
+                LogLevel.Step => ConsoleColor.Cyan,
                 _ => ConsoleColor.Gray,
             };
-            Console.WriteLine(msg);
+            Console.WriteLine(level == LogLevel.Step ? "==> " + msg : msg);
             Console.ResetColor();
         };
         IUserInteraction ui = args.Contains("--non-interactive") ? new NonInteractive(svc.Log) : new ConsoleInteraction();
@@ -122,6 +126,29 @@ internal static class Program
                 var r = svc.Backup();
                 return r.Outcome is Core.Backup.BackupOutcome.Created or Core.Backup.BackupOutcome.AlreadyExists ? 0 : 2;
             }
+
+            case "--install-tools":
+            {
+                var missing = svc.ToolSetup.Missing();
+                if (missing.Count == 0) { svc.Log.Success("All tools are already installed."); return 0; }
+                var ok = svc.EnsureToolsAsync(ui).GetAwaiter().GetResult();
+                return ok ? 0 : 2;
+            }
+
+            case "--check-adb":
+            {
+                var h = svc.Adb.CheckHealth();
+                Console.WriteLine($"adb binary   : {(h.Found ? h.Path : "NOT FOUND (run --install-tools)")}");
+                Console.WriteLine($"adb version  : {h.Version ?? "-"}");
+                Console.WriteLine($"adb server   : {(h.ServerRunning ? "running" : "NOT running")}");
+                if (h.Error != null) Console.WriteLine($"problem      : {h.Error}");
+                if (!h.Ok) return 2;
+                Console.WriteLine();
+                return ListDevices(svc);
+            }
+
+            case "--restart-adb":
+                return svc.Adb.RestartServer() ? 0 : 2;
 
             case "--list-devices":
                 return ListDevices(svc);

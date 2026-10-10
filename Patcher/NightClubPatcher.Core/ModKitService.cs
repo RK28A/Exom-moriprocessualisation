@@ -28,6 +28,8 @@ public sealed class KitStatus
     public string? PatchedCurrent { get; set; }
     public string? PatchedPrevious { get; set; }
     public bool? SafeMode { get; set; }
+    public AdbHealth? AdbHealth { get; set; }
+    public IReadOnlyList<string> MissingTools { get; set; } = Array.Empty<string>();
     public List<string> Warnings { get; } = new();
 
     public string DeviceText => Device switch
@@ -64,6 +66,7 @@ public sealed class ModKitService
     public InstallService Installer { get; }
     public RestoreService Restorer { get; }
     public LogcatService Logcat { get; }
+    public ToolSetup ToolSetup { get; }
 
     private readonly Dictionary<string, (DateTime mtime, long size, ApkAnalysis analysis)> _analysisCache = new();
 
@@ -84,6 +87,7 @@ public sealed class ModKitService
         Installer = new InstallService(Log, UserData);
         Restorer = new RestoreService(Log, Backups, Installer);
         Logcat = new LogcatService(Log);
+        ToolSetup = new ToolSetup(Paths, Tools, Log);
     }
 
     private string? ModKitJavaHash => Keys.TryLoad()?.CertJavaHash;
@@ -103,6 +107,26 @@ public sealed class ModKitService
         var a = ApkInspector.Analyze(apk, InspectOptions());
         lock (_analysisCache) _analysisCache[key] = (fi.LastWriteTimeUtc, fi.Length, a);
         return a;
+    }
+
+    // ------------------------------------------------------------------ tools
+
+    /// <summary>Re-locates tools (after ToolSetup installed them).</summary>
+    public void ReloadTools()
+    {
+        Adb.AdbPath = Tools.FindAdb();
+        Log.Info("adb: " + (Adb.AdbPath ?? "not found"));
+    }
+
+    /// <summary>Downloads missing tools after asking the user. Returns true when nothing is missing afterwards.</summary>
+    public async Task<bool> EnsureToolsAsync(IUserInteraction ui, CancellationToken ct = default)
+    {
+        if (ToolSetup.Missing().Count == 0) return true;
+        if (!ui.Confirm("Install required tools", ToolSetup.ConsentText(), "Download and install")) return false;
+        var r = await ToolSetup.InstallMissingAsync(ct);
+        ReloadTools();
+        if (!r.Ok) ui.Notify("Tool installation", "Some tools could not be installed:" + Environment.NewLine + string.Join(Environment.NewLine, r.Errors));
+        return ToolSetup.Missing().Count == 0;
     }
 
     // ------------------------------------------------------------------ detection
@@ -275,7 +299,10 @@ public sealed class ModKitService
     public KitStatus Detect(bool analyzeBackup = true)
     {
         var s = new KitStatus();
-        s.Device = Adb.DetectDevice(out var dev);
+        s.AdbHealth = Adb.CheckHealth();
+        s.MissingTools = ToolSetup.Missing();
+        AdbDevice? dev = null;
+        s.Device = s.AdbHealth.Ok ? Adb.DetectDevice(out dev) : DeviceState.NoAdb;
         s.DeviceSerial = dev?.Serial;
         s.LoaderPath = Paths.FindLoader();
         if (Adb.Available) s.Devices = Adb.Devices();
