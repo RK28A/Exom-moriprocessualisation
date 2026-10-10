@@ -8,7 +8,8 @@ namespace NightClubPatcher.Gui;
 /// <summary>Error dialog with the message, expandable technical details and Copy / Open logs buttons.</summary>
 public static class ErrorDialog
 {
-    public static void Show(Window? owner, string title, string message, string? details = null, string? logsFolder = null)
+    public static void Show(Window? owner, string title, string message, string? details = null, string? logsFolder = null,
+        bool isError = true)
     {
         var res = Application.Current.Resources;
         var win = new Window
@@ -26,10 +27,10 @@ public static class ErrorDialog
         var root = new StackPanel { Margin = new Thickness(20) };
         root.Children.Add(new TextBlock
         {
-            Text = "✗  " + title,
+            Text = (isError ? "✗  " : "✓  ") + title,
             FontSize = 18,
             FontWeight = FontWeights.Bold,
-            Foreground = (Brush)res["Danger"],
+            Foreground = (Brush)res[isError ? "Danger" : "Ok"],
             Margin = new Thickness(0, 0, 0, 10),
         });
         root.Children.Add(new TextBlock
@@ -45,7 +46,8 @@ public static class ErrorDialog
         {
             root.Children.Add(new Expander
             {
-                Header = new TextBlock { Text = "Technical details", Foreground = (Brush)res["Muted"] },
+                IsExpanded = !isError,
+                Header = new TextBlock { Text = isError ? "Technical details" : "Details", Foreground = (Brush)res["Muted"] },
                 Margin = new Thickness(0, 0, 0, 12),
                 Content = new TextBox
                 {
@@ -74,7 +76,7 @@ public static class ErrorDialog
         buttons.Children.Add(copy);
         if (logsFolder != null)
         {
-            var logs = new Button { Content = "Open logs folder" };
+            var logs = new Button { Content = "Open folder" };
             logs.Click += (_, _) =>
             {
                 try { Process.Start(new ProcessStartInfo(logsFolder) { UseShellExecute = true }); }

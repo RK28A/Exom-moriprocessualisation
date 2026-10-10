@@ -29,6 +29,8 @@ internal static class Program
 
         Other commands
           --install-previous           Reinstall patched-previous.apk (crash protection)
+          --list-data                  Show every file of Android/data and Android/obb of the game (copies nothing)
+          --backup-data                Back up the game data now (several methods, verified file by file)
           --launch                     Start the game
           --logcat                     Stream filtered logcat (NCSLoader/Unity/il2cpp/crashes)
           --safe-mode on|off           Toggle /sdcard/NightClubMods/disable_mods
@@ -167,6 +169,19 @@ internal static class Program
 
             case "--restart-adb":
                 return svc.Adb.RestartServer() ? 0 : 2;
+
+            case "--list-data":
+                Console.WriteLine(svc.ListGameData(ui));
+                return 0;
+
+            case "--backup-data":
+            {
+                var b = svc.BackupGameData(ui);
+                if (b == null) return 2;
+                Console.WriteLine();
+                Console.WriteLine(b.Describe());
+                return b.AccessibleDataComplete ? 0 : 3;
+            }
 
             case "--list-devices":
                 return ListDevices(svc);

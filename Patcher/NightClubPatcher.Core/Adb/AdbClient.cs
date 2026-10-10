@@ -252,6 +252,44 @@ public sealed class AdbClient
 
     public void ForceStop(string package) => Shell($"am force-stop {package}");
 
+    /// <summary>
+    /// Runs "adb exec-out &lt;command&gt;" and writes its raw (binary) stdout to a local file,
+    /// e.g. a tar stream. Returns false and the error text when the command fails.
+    /// </summary>
+    public (bool ok, string error) ExecOutToFile(string command, string localFile, TimeSpan? timeout = null)
+    {
+        if (AdbPath == null) return (false, "adb not found");
+        var psi = new System.Diagnostics.ProcessStartInfo(AdbPath)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        if (Serial != null) { psi.ArgumentList.Add("-s"); psi.ArgumentList.Add(Serial); }
+        psi.ArgumentList.Add("exec-out");
+        psi.ArgumentList.Add(command);
+        _log.Debug("adb exec-out " + command);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(localFile))!);
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            var errTask = p.StandardError.ReadToEndAsync();
+            using (var f = File.Create(localFile)) p.StandardOutput.BaseStream.CopyTo(f);
+            if (!p.WaitForExit((int)(timeout ?? TimeSpan.FromHours(1)).TotalMilliseconds))
+            {
+                try { p.Kill(true); } catch { /* ignore */ }
+                return (false, "timed out");
+            }
+            var err = errTask.Result.Trim();
+            return (p.ExitCode == 0, err);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     public bool RemoteExists(string path) => Shell($"ls -d \"{path}\" >/dev/null 2>&1 && echo yes || echo no").StdOut.Trim() == "yes";
 
     public bool Launch(string package)

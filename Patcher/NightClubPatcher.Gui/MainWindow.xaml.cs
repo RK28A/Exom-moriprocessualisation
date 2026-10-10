@@ -610,6 +610,29 @@ public partial class MainWindow : Window
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
 
+    private async void ListData_Click(object sender, RoutedEventArgs e)
+    {
+        await RunAsync("List game data", async () =>
+        {
+            var text = await Task.Run(() => _svc.ListGameData(_ui));
+            _lastResult = true;
+            ErrorDialog.Show(this, "Game data on the headset", "Files the game stores where adb can reach them:", text, null, isError: false);
+        });
+    }
+
+    private async void BackupData_Click(object sender, RoutedEventArgs e)
+    {
+        await RunAsync("Backup game data", async () =>
+        {
+            var b = await Task.Run(() => _svc.BackupGameData(_ui));
+            if (b == null) { Report("BACKUP GAME DATA", false, "No headset connected."); return; }
+            _lastResult = b.AccessibleDataComplete;
+            ErrorDialog.Show(this, b.AccessibleDataComplete ? "Game data saved" : "Game data backup INCOMPLETE",
+                b.AccessibleDataComplete ? "Every file adb can reach was saved and verified." : "Some files could not be saved - see the details.",
+                b.Describe(), b.Directory, isError: !b.AccessibleDataComplete);
+        });
+    }
+
     private async void Emergency_Click(object sender, RoutedEventArgs e)
     {
         string? apk = null;
