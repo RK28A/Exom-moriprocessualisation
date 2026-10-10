@@ -386,7 +386,11 @@ public sealed class ToolSetup
     }
 
     private static Dictionary<string, string?> Details(string url, string sha256, string verifiedWith) =>
-        new() { ["url"] = url, ["sha256"] = sha256, ["verifiedWith"] = verifiedWith };
+        new() { ["url"] = AbsoluteUrl(url), ["sha256"] = sha256, ["verifiedWith"] = verifiedWith };
+
+    /// <summary>SDK repository archives are listed relative to <see cref="RepositoryBase"/>.</summary>
+    public static string AbsoluteUrl(string url) =>
+        url.StartsWith("https://", StringComparison.Ordinal) ? url : RepositoryBase + url;
 
     /// <summary>"&lt;sha256&gt;  &lt;file&gt;" lines (sha256sum format).</summary>
     public static string? ParseChecksumFile(string text, string fileName)
@@ -423,7 +427,7 @@ public sealed class ToolSetup
 
     private async Task<string> DownloadAsync(string urlOrRelative, CancellationToken ct)
     {
-        var url = urlOrRelative.StartsWith("https://", StringComparison.Ordinal) ? urlOrRelative : RepositoryBase + urlOrRelative;
+        var url = AbsoluteUrl(urlOrRelative);
         if (!url.StartsWith("https://", StringComparison.Ordinal)) throw new InvalidOperationException("Refusing non-HTTPS download.");
         var dir = Path.Combine(_paths.Cache, "downloads");
         Directory.CreateDirectory(dir);
