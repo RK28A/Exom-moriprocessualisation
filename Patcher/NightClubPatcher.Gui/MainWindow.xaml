@@ -177,7 +177,7 @@
             <Button Content="Open Logs" Click="OpenLogs_Click"/>
             <Button Content="Open Logcat" Click="Logcat_Click"/>
             <Button Content="Advanced" Click="Advanced_Click"/>
-            <Button Style="{StaticResource Danger}" Content="Emergency Restore" Click="Emergency_Click"/>
+            <Button Style="{StaticResource DangerButton}" Content="Emergency Restore" Click="Emergency_Click"/>
           </WrapPanel>
           <CheckBox x:Name="LaunchAfterInstall" Content="Launch the game after install" IsChecked="True" Margin="2,0,0,12"/>
         </StackPanel>

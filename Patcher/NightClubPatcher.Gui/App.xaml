@@ -64,7 +64,7 @@
       <Setter Property="FontSize" Value="15"/>
       <Setter Property="Padding" Value="18,14"/>
     </Style>
-    <Style x:Key="Danger" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+    <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Background" Value="#3D1520"/>
       <Setter Property="BorderBrush" Value="#FF5C6C"/>
     </Style>
