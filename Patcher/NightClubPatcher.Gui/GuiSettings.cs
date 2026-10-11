@@ -1,6 +1,5 @@
 using System.IO;
 using System.Text.Json;
-using NightClubPatcher.Core.Recovery;
 
 namespace NightClubPatcher.Gui;
 
@@ -10,15 +9,10 @@ namespace NightClubPatcher.Gui;
 /// </summary>
 public sealed class GuiSettings
 {
-    /// <summary>Game data mode for signature-mismatch reinstalls (CLI name: keep, backup-only, skip, clean).</summary>
-    public string DataMode { get; set; } = GameDataMode.Keep.CliName();
-
     public bool LaunchAfterInstall { get; set; } = true;
 
     public static string FilePath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NCMK", "gui-settings.json");
-
-    public GameDataMode GameDataMode => GameDataModes.TryParse(DataMode, out var m) ? m : GameDataMode.Keep;
 
     public static GuiSettings Load()
     {

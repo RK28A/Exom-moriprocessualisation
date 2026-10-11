@@ -369,7 +369,7 @@ the mods that will be embedded and asks to continue. A Release folder needs `Nat
     disable_mods   Safe Mode flag
   ```
 
-  Uninstalling the game deletes this folder (back it up with **Backup Game Data**).
+  Uninstalling the game deletes this folder; the patcher pushes `DeviceMods` again after install.
 
 `mod.json` is what makes a folder a mod for the build (and its `"library"` names the output); at
 run time the authoritative metadata is `NCMKModInfo` returned by `NCMKMod_GetInfo`.

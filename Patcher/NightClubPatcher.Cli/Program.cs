@@ -29,8 +29,6 @@ internal static class Program
 
         Other commands
           --install-previous           Reinstall patched-previous.apk (crash protection)
-          --list-data                  Show every file of Android/data and Android/obb of the game (copies nothing)
-          --backup-data                Back up the game data now (several methods, verified file by file)
           --launch                     Start the game
           --logcat                     Stream filtered logcat (NCMK/Unity/il2cpp/crashes)
           --push-mods                  Push DeviceMods/Mods/*.so and DeviceMods/Config/* to the headset's NCMKMods
@@ -60,12 +58,6 @@ internal static class Program
           --no-mods                    Do not embed libncmkmod_*.so into the APK
           --loader <path>              Use a specific libncmkloader.so
           --mods keep|disable|delete   What to do with NCMKMods on restore (default: ask)
-          --data keep|backup-only|skip|clean
-                                       Game data on a signature-mismatch reinstall (default: keep)
-                                         keep         back up, reinstall, restore
-                                         backup-only  back up, reinstall, do not restore
-                                         skip         no backup, no restore
-                                         clean        back up for safety, reinstall, start with fresh data
           --no-install                 (with --unpatch) only build the APK
           --non-interactive            Never prompt; destructive choices are cancelled
         """;
@@ -111,17 +103,6 @@ internal static class Program
         IUserInteraction ui = args.Contains("--non-interactive") ? new NonInteractive(svc.Log) : new ConsoleInteraction();
 
         if (args.Contains("--bundled-only")) { svc.Tools.BundledOnly = true; svc.ReloadTools(); }
-
-        if (args.Contains("--data"))
-        {
-            if (!GameDataModes.TryParse(Value(args, "--data"), out var mode))
-            {
-                Console.WriteLine("Usage: --data keep|backup-only|skip|clean");
-                return 1;
-            }
-            svc.DataMode = mode;
-            svc.Log.Info("Game data mode: " + mode.CliName());
-        }
 
         var serial = Value(args, "--device");
         if (args.Contains("--device"))
@@ -202,19 +183,6 @@ internal static class Program
 
             case "--restart-adb":
                 return svc.Adb.RestartServer() ? 0 : 2;
-
-            case "--list-data":
-                Console.WriteLine(svc.ListGameData(ui));
-                return 0;
-
-            case "--backup-data":
-            {
-                var b = svc.BackupGameData(ui);
-                if (b == null) return 2;
-                Console.WriteLine();
-                Console.WriteLine(b.Describe());
-                return b.AccessibleDataComplete ? 0 : 3;
-            }
 
             case "--list-devices":
                 return ListDevices(svc);

@@ -136,22 +136,8 @@ public partial class MainWindow : Window
     private void ApplySettings()
     {
         _loadingSettings = true;
-        foreach (var m in GameDataModes.All) DataModeCombo.Items.Add(m.Label());
-        var mode = _settings.GameDataMode;
-        DataModeCombo.SelectedIndex = Array.IndexOf(GameDataModes.All, mode);
-        _svc.DataMode = mode;
         LaunchAfterInstall.IsChecked = _settings.LaunchAfterInstall;
         _loadingSettings = false;
-    }
-
-    private void DataMode_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-    {
-        if (_loadingSettings || DataModeCombo.SelectedIndex < 0) return;
-        var mode = GameDataModes.All[DataModeCombo.SelectedIndex];
-        _svc.DataMode = mode;
-        _settings.DataMode = mode.CliName();
-        _settings.Save();
-        _svc.Log.Info("Game data mode: " + mode.Label());
     }
 
     private void LaunchAfterInstall_Changed(object sender, RoutedEventArgs e)
@@ -687,29 +673,6 @@ public partial class MainWindow : Window
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
-
-    private async void ListData_Click(object sender, RoutedEventArgs e)
-    {
-        await RunAsync("List game data", async () =>
-        {
-            var text = await Task.Run(() => _svc.ListGameData(_ui));
-            _lastResult = true;
-            ErrorDialog.Show(this, "Game data on the headset", "Files the game stores where adb can reach them:", text, null, isError: false);
-        });
-    }
-
-    private async void BackupData_Click(object sender, RoutedEventArgs e)
-    {
-        await RunAsync("Backup game data", async () =>
-        {
-            var b = await Task.Run(() => _svc.BackupGameData(_ui));
-            if (b == null) { Report("BACKUP GAME DATA", false, "No headset connected."); return; }
-            _lastResult = b.AccessibleDataComplete;
-            ErrorDialog.Show(this, b.AccessibleDataComplete ? "Game data saved" : "Game data backup INCOMPLETE",
-                b.AccessibleDataComplete ? "Every file adb can reach was saved and verified." : "Some files could not be saved - see the details.",
-                b.Describe(), b.Directory, isError: !b.AccessibleDataComplete);
-        });
-    }
 
     private async void Emergency_Click(object sender, RoutedEventArgs e)
     {

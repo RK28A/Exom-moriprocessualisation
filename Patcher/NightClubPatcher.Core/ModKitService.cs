@@ -63,15 +63,8 @@ public sealed class ModKitService
     public ProfileStore Profiles { get; }
     public BuildStore Builds { get; }
     public PatchEngine Patcher { get; }
-    public UserDataService UserData { get; }
     public InstallService Installer { get; }
 
-    /// <summary>What a signature-mismatch reinstall does with the game data (CLI --data, GUI "Game Data Mode").</summary>
-    public GameDataMode DataMode
-    {
-        get => Installer.DataMode;
-        set => Installer.DataMode = value;
-    }
     public RestoreService Restorer { get; }
     public LogcatService Logcat { get; }
     public ToolSetup ToolSetup { get; }
@@ -92,8 +85,7 @@ public sealed class ModKitService
         Profiles = new ProfileStore(Paths);
         Builds = new BuildStore(Paths, Log);
         Patcher = new PatchEngine(Paths, Log, Backups, Profiles, Builds, Signer, Keys);
-        UserData = new UserDataService(Paths, Log);
-        Installer = new InstallService(Log, UserData);
+        Installer = new InstallService(Log);
         Restorer = new RestoreService(Log, Backups, Installer);
         Logcat = new LogcatService(Log);
         ToolSetup = new ToolSetup(Paths, Tools, Log);
@@ -551,25 +543,6 @@ public sealed class ModKitService
 
     // ------------------------------------------------------------------ game data
 
-    /// <summary>Lists every file of Android/data and Android/obb for the game (nothing is copied).</summary>
-    public string ListGameData(IUserInteraction? ui = null)
-    {
-        var connected = ui != null ? ConnectDevice(ui, out var msg) : ConnectDevice(out msg);
-        if (!connected) return msg;
-        Log.Step("Listing game data on the headset");
-        var text = UserData.DescribeOnDevice(Adb);
-        foreach (var line in text.Split('\n')) if (line.Trim().Length > 0) Log.Info(line.TrimEnd());
-        return text;
-    }
-
-    /// <summary>Backs up the game's accessible data now, without uninstalling anything.</summary>
-    public UserDataBackup? BackupGameData(IUserInteraction? ui = null)
-    {
-        var connected = ui != null ? ConnectDevice(ui, out var msg) : ConnectDevice(out msg);
-        if (!connected) { Log.Error(msg); return null; }
-        return UserData.Backup(Adb, ui);
-    }
-
     // ------------------------------------------------------------------ recovery
 
     public RestoreResult RestoreOriginal(IUserInteraction ui, ModFilesPolicy policy = ModFilesPolicy.Ask)
@@ -683,14 +656,6 @@ public sealed class ModKitService
                     false => "not present",
                     _ => "unknown (native libs not extracted / not readable)",
                 });
-            }
-            foreach (var (label, remote) in new[] { ("Game data (Android/data)", GameConstants.DeviceExternalData), ("Game data (Android/obb)", GameConstants.DeviceObbDir) })
-            {
-                var inv = UserData.Inventory(Adb, label, remote, Path.GetTempPath());
-                r.Add(label, !inv.Exists || inv.InventoryComplete ? CheckStatus.Info : CheckStatus.Warn,
-                    !inv.Exists ? "does not exist"
-                    : $"{inv.Inventory.Count} files, {FolderBackupReport.FormatSize(inv.TotalBytes)}" +
-                      (inv.InventoryComplete ? "" : " - listing incomplete: " + string.Join("; ", inv.InventoryErrors.Take(2))));
             }
             r.Add("Mod folder", CheckStatus.Info, Adb.RemoteExists(GameConstants.DeviceModsRoot) ? GameConstants.DeviceModsRoot : "absent");
             r.Add("Safe mode flag", CheckStatus.Info, Adb.RemoteExists(GameConstants.DeviceSafeModeFlag) ? "ON" : "off");

@@ -74,8 +74,7 @@ Legend: ✅ implemented and covered by automated tests · 🟡 implemented, **ne
 | 55 | `NCMK::Input` fallback through `UnityEngine.XR.InputDevices` when OVRInput is missing or silent | ✅ host / 🟡 (HurricaneVR rig) | `SDK/Input/ncmk_input.hpp` |
 | 56 | UI: `Image::SetSliced`, 9-slice `CreateSprite`, `Text::SetBold/SetOverflow`, `SetRaycastTarget`, `CreateRoundedSprite`, `CreateGlowSprite` | 🟡 (compiles; fake has no uGUI) | `SDK/UI/ncmk_ui.hpp` |
 | 57 | Tool check reuses tools from `%LOCALAPPDATA%\NCMK\Tools` and from other NCMK copies next to the kit; new tools go to the shared folder (no re-download after unzipping a new kit) | ✅ unit / 🟡 Windows (needs on-device verification) | `ToolLocator.ToolRoots`, `InstallRoot` |
-| 58 | Game data mode for signature-mismatch reinstalls: `--data keep\|backup-only\|skip\|clean`, GUI *Game Data Mode* saved in `%APPDATA%\NCMK\gui-settings.json`; a failed restore never fails the install or blocks the launch | ✅ unit / 🟡 needs on-device verification | `GameDataMode`, `InstallService`, `GuiSettings` |
-| 59 | Game data restore: only files verified during the backup are pushed (no partial leftovers), caches (`cache/`, `files/il2cpp/`, PSO cache) and NCMK binaries/logs are not restored, MD5 checked after backup and after restore, GNU tar fallback | ✅ fake adb / 🟡 needs on-device verification | `UserDataService.Restore` |
+| 58 | No game data backup/restore: a signature-mismatch reinstall asks once, uninstalls and installs; the game starts with fresh data | ✅ unit / 🟡 needs on-device verification | `InstallService` |
 | 60 | "Pin fingerprints and continue" prompt when a patch is blocked by unpinned fingerprints | 🟡 needs on-device verification | `ModKitService.PatchSelected` |
 | 61 | GUI: custom dark title bar with the NCMK logo (all windows and dialogs), app icon, dark ScrollBar / ComboBox / CheckBox / TabControl / TreeView / ToolTip styles | 🟡 (WPF only built on CI) | `App.xaml`, `Assets/ncmk.ico` |
 
@@ -94,9 +93,8 @@ Legend: ✅ implemented and covered by automated tests · 🟡 implemented, **ne
 
 ## Known limitations
 
-- `/data/data/<pkg>` is not readable without root; it can be lost when Android requires uninstalling
-  because of a signature change. External data (`/sdcard/Android/data`, `obb`) is preserved by the
-  game-data backup. NCMKMods lives in external data, so uninstalling deletes it.
+- `/data/data/<pkg>` is not readable without root; game data is not backed up: an uninstall forced by a
+  signature change resets the game's settings. NCMKMods lives in external data, so uninstalling deletes it.
 - The game checks Meta entitlement (`MetaAccount.OnUseEntitlement`) and has a server-side ban
   system. NCMK contains no bypass, spoofing or evasion for either; whether a re-signed APK passes
   the entitlement check is unknown until tested, and diagnostics report a failure.
