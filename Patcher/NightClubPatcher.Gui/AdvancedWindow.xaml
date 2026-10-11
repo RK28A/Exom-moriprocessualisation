@@ -35,7 +35,13 @@
         <CheckBox x:Name="AllowUnverified" Content="Allow unverified build (unknown version / fingerprints not pinned)"
                   Foreground="{StaticResource Fg}" Margin="0,4" Checked="Options_Changed" Unchecked="Options_Changed"/>
         <CheckBox x:Name="EmbedMods" Content="Embed libncmkmod_*.so from Native/out into the APK" IsChecked="True"
-                  Foreground="{StaticResource Fg}" Margin="0,4,0,12" Checked="Options_Changed" Unchecked="Options_Changed"/>
+                  Foreground="{StaticResource Fg}" Margin="0,4" Checked="Options_Changed" Unchecked="Options_Changed"/>
+        <CheckBox x:Name="SceneLoaderDiagnostics" Content="Scene loader diagnostics (logs only, behaviour unchanged)" IsChecked="True"
+                  Foreground="{StaticResource Fg}" Margin="0,4" Checked="Options_Changed" Unchecked="Options_Changed"
+                  ToolTip="The loader logs bl_SceneLoaderManager fields/methods, NULL references, Meta platform app id state and OBB / storage access. Applied at the next patch."/>
+        <CheckBox x:Name="SceneLoaderRecovery" Content="Scene loader recovery (one SceneManager fallback after a confirmed failure)"
+                  Foreground="{StaticResource Fg}" Margin="0,4,0,12" Checked="Options_Changed" Unchecked="Options_Changed"
+                  ToolTip="Off by default. Only after a confirmed NullReferenceException and 10 s stuck in the same scene: loads the next build scene once with SceneManager.LoadSceneAsync. Applied at the next patch."/>
         <Button Content="Pin fingerprints from original backup" Click="Pin_Click"/>
         <Button Content="Install patched-current.apk" Click="InstallCurrent_Click"/>
         <Button Content="Restore previous modded build (patched-previous.apk)" Click="InstallPrevious_Click"/>

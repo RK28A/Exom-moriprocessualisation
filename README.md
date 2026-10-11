@@ -369,6 +369,43 @@ RESTORE ORIGINAL remains the safest option.
 NCMK does not back up or restore game data. The game keeps almost nothing (a few settings);
 when a signature change forces an uninstall, it simply starts with fresh data.
 
+## Scene loader diagnostics (stuck in "Loading")
+
+The loader can explain why the game stays in its `Loading` scene (`NullReferenceException` in
+`bl_SceneLoaderManager.IsGlobalLoadingScreen` / `LoadSceneByID`). Everything is resolved by name
+through IL2CPP; the only memory-layout assumption stays the two MethodInfo slots.
+
+| Log prefix | What it shows |
+| --- | --- |
+| `[NCMK][SceneLoader]` | class namespace, parents, every field (type, static/instance), property and method (parameters, MethodInfo, method pointer); on the first frame and on each scene change: static field values, loaded instances and their fields, **`NULL FIELD:`** lines (including destroyed / missing Unity objects), the result or exception of `IsGlobalLoadingScreen()`; `bl_SceneLoader*.Awake begins / normal loader failed` |
+| `[NCMK][MetaPlatform]` | PlatformSettings app id set or empty, `Core.IsInitialized()`, `MetaAchievements.InitPlatform` begins / failed (read-only, nothing bypassed) |
+| `[NCMK][Storage]` | the OBB folder and the external files folder as the game process sees them (exists, files, readable), `Application.dataPath` |
+
+`LoadSceneByID` and `IsGlobalLoadingScreen` are called directly by compiled game code, so NCMK cannot
+run code right before them; it probes the engine-invoked `Awake()` of their callers instead.
+The requested `sceneID` of the game's own call is therefore not visible.
+
+Settings: **Advanced > Builds & Recovery** (*Scene loader diagnostics*, *Scene loader recovery*) or
+`--scene-loader-diagnostics on|off` / `--scene-loader-recovery on|off`; applied at the next patch
+(written to `assets/NCMK/loader.json` in the APK). `NCMKMods/Config/config.json` can override them:
+
+```json
+{ "loader": { "sceneLoaderDiagnostics": true, "sceneLoaderRecovery": false,
+              "sceneLoaderRecoveryScene": -1, "sceneLoaderRecoveryDelaySeconds": 10 } }
+```
+
+Recovery (off by default) acts only after a confirmed failure (a probed `Awake` threw, or
+`IsGlobalLoadingScreen()` throws) and `sceneLoaderRecoveryDelaySeconds` in the same scene: it validates the
+target (`sceneLoaderRecoveryScene`, or active index + 1) against `sceneCountInBuildSettings` and
+`SceneUtility.GetScenePathByBuildIndex`, calls `SceneManager.LoadSceneAsync` once on the main thread, and
+reports `fallback succeeded` or that the scene did not change. If the scene's content is missing (see
+`[NCMK][Storage]`), no fallback can load it.
+
+Test flow on the headset (keep the logcat of each run):
+1. **A** - diagnostics on, recovery off, no mods (`--no-mods`): find the NULL field / reference.
+2. **B** - diagnostics on, recovery on, no mods: does the fallback get past `Loading`?
+3. **C** - mods back on once scene loading is stable.
+
 ## Writing mods
 
 See [`docs/MODDING.md`](docs/MODDING.md): lifecycle and threads, every export and host-API

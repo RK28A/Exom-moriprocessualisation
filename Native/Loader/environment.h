@@ -12,6 +12,16 @@ struct LoaderConfig {
     bool logging = true;
     bool safeMode = false;
     std::vector<std::string> disabledMods;  // "mods": { "<id>": false }
+
+    // Diagnostics (Native/Diagnostics). Defaults come from assets/NCMK/loader.json in the APK
+    // (written by the patcher), then "loader" in NCMKMods/Config/config.json when it is readable.
+    bool sceneLoaderDiagnostics = true;   // log bl_SceneLoaderManager metadata and state; behaviour unchanged
+    bool sceneLoaderRecovery = false;     // after a confirmed failure, one SceneManager.LoadSceneAsync fallback
+    int sceneLoaderRecoveryScene = -1;    // build index to load; -1 = active scene index + 1
+    int sceneLoaderRecoveryDelay = 10;    // seconds stuck in the same scene before the fallback
+    bool metaPlatformDiagnostics = true;  // log Oculus.Platform app id / init state (read-only)
+    bool storageDiagnostics = true;       // log OBB / external storage access from the game process
+    std::string source = "defaults";      // where the values came from (logged)
 };
 
 struct DeviceInfo {
@@ -35,7 +45,18 @@ std::string AppDataDir();             // /data/user/0/<pkg> (or /data/data/<pkg>
 /// storage permission, so its own external files folder is used). Creates Mods/Config/Logs/Cache/Overrides.
 std::string ResolveModsRoot(const std::string& package);
 
-LoaderConfig LoadConfig(const std::string& modsRoot);
+/// Applies the "loader" keys of a JSON text (config.json or the APK's assets/NCMK/loader.json).
+void ApplyLoaderJson(LoaderConfig& cfg, const std::string& json);
+
+/// Reads assets/NCMK/loader.json from the game's APK (stored entry) into cfg; false when absent.
+bool LoadEmbeddedConfig(LoaderConfig& cfg, const std::string& apkPath);
+
+/// base.apk next to an extracted lib dir (".../lib/arm64/libncmkloader.so" -> ".../base.apk"), or the
+/// APK part of "app.apk!/lib/arm64-v8a/libncmkloader.so".
+std::string ApkPathFromLibrary(const std::string& libPath);
+
+/// Reads config.json (created with defaults when missing) on top of cfg.
+LoaderConfig LoadConfig(const std::string& modsRoot, LoaderConfig cfg = {});
 bool SafeModeFlagPresent(const std::string& modsRoot);
 
 bool MakeDirs(const std::string& path);

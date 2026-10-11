@@ -77,6 +77,11 @@ Legend: ✅ implemented and covered by automated tests · 🟡 implemented, **ne
 | 58 | No game data backup/restore: a signature-mismatch reinstall asks once, uninstalls and installs; the game starts with fresh data | ✅ unit / 🟡 needs on-device verification | `InstallService` |
 | 60 | "Pin fingerprints and continue" prompt when a patch is blocked by unpinned fingerprints | 🟡 needs on-device verification | `ModKitService.PatchSelected` |
 | 61 | GUI: custom dark title bar with the NCMK logo (all windows and dialogs), app icon, dark ScrollBar / ComboBox / CheckBox / TabControl / TreeView / ToolTip styles | 🟡 (WPF only built on CI) | `App.xaml`, `Assets/ncmk.ico` |
+| 62 | Scene loader diagnostics (`Native/Diagnostics`): `bl_SceneLoaderManager` metadata (fields, properties, methods, MethodInfo/method pointers), static fields + loaded instances with NULL / destroyed references, `IsGlobalLoadingScreen()` reproduced with exception capture, probes on engine-invoked `bl_SceneLoader*.Awake()` (begins / threw), logs only | ✅ host (fake runtime) / 🟡 needs on-device verification | `SceneLoaderDiagnostics.cpp`, `il2cpp_inspect.cpp` |
+| 63 | Scene loader recovery (default off): after a confirmed failure and N s in the same scene, one `SceneManager.LoadSceneAsync(index)` with range / path / recursion checks; any failure disables it | ✅ host / 🟡 needs on-device verification | `SceneLoaderDiagnostics.cpp` |
+| 64 | Meta platform diagnostics (read-only: PlatformSettings app id set/empty, `Core.IsInitialized()`, probe on `MetaAchievements.InitPlatform`); no entitlement or account check bypassed | ✅ host / 🟡 needs on-device verification | `PlatformDiagnostics.cpp` |
+| 65 | Storage / OBB diagnostics from the game process (obb folder, files readable or not, Application.dataPath) + Diagnose lists the device OBB folder and storage permissions | 🟡 needs on-device verification | `PlatformDiagnostics.cpp`, `ModKitService.Diagnose` |
+| 66 | Loader settings embedded in the APK (`assets/NCMK/loader.json`, STORED) so diagnostics toggles work when NCMKMods is not readable; `config.json` overrides; CLI `--scene-loader-diagnostics/--scene-loader-recovery on\|off`, Advanced checkboxes | ✅ unit + zip read test / 🟡 needs on-device verification | `PatchOptions.LoaderConfigJson`, `LoadEmbeddedConfig` |
 
 ## Next steps, in order
 

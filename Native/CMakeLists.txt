@@ -44,11 +44,16 @@ add_library(ncmkloader SHARED
   Unity/unity_runtime.cpp
   Unity/input_pump.cpp
   Plugins/plugin_manager.cpp
-  Hooks/main_thread.cpp)
+  Hooks/main_thread.cpp
+  Diagnostics/il2cpp_inspect.cpp
+  Diagnostics/SceneLoaderDiagnostics.cpp
+  Diagnostics/PlatformDiagnostics.cpp)
 target_compile_options(ncmkloader PRIVATE ${NCMK_COMMON_FLAGS})
 # The dispatcher entry sits between Unity and a managed method: a managed exception thrown by the
 # original (IL2CPP raises it as a C++ exception) must be able to unwind through this frame.
 set_source_files_properties(Hooks/main_thread.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions;-funwind-tables")
+# Probe entries sit between IL2CPP frames: managed exceptions (C++ exceptions) must unwind through them.
+set_source_files_properties(Diagnostics/il2cpp_inspect.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions;-funwind-tables")
 target_include_directories(ncmkloader PRIVATE ${NCMK_ROOT})
 set_target_properties(ncmkloader PROPERTIES OUTPUT_NAME ncmkloader)
 

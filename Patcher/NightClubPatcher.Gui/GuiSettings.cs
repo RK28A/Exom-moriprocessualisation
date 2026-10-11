@@ -11,6 +11,9 @@ public sealed class GuiSettings
 {
     public bool LaunchAfterInstall { get; set; } = true;
 
+    public bool SceneLoaderDiagnostics { get; set; } = true;
+    public bool SceneLoaderRecovery { get; set; }
+
     public static string FilePath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NCMK", "gui-settings.json");
 

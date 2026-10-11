@@ -16,6 +16,7 @@ struct Il2CppObject;
 struct Il2CppString;
 struct Il2CppThread;
 struct Il2CppType;
+struct PropertyInfo;
 typedef uint16_t Il2CppChar;
 
 // Exported IL2CPP API, resolved with dlsym (never by offset).
@@ -64,7 +65,16 @@ typedef uint16_t Il2CppChar;
     X(Il2CppObject*, il2cpp_type_get_object, (const Il2CppType*))                                     \
     X(uintptr_t, il2cpp_gchandle_new, (Il2CppObject*, bool))                                          \
     X(void, il2cpp_gchandle_free, (uintptr_t))                                                        \
-    X(void*, il2cpp_resolve_icall, (const char*))
+    X(void*, il2cpp_resolve_icall, (const char*))                                                     \
+    X(const Il2CppType*, il2cpp_field_get_type, (FieldInfo*))                                         \
+    X(int, il2cpp_field_get_flags, (FieldInfo*))                                                      \
+    X(const PropertyInfo*, il2cpp_class_get_properties, (Il2CppClass*, void**))                       \
+    X(const char*, il2cpp_property_get_name, (const PropertyInfo*))                                   \
+    X(const MethodInfo*, il2cpp_property_get_get_method, (const PropertyInfo*))                       \
+    X(const Il2CppType*, il2cpp_method_get_return_type, (const MethodInfo*))                          \
+    X(Il2CppClass*, il2cpp_class_from_type, (const Il2CppType*))                                      \
+    X(bool, il2cpp_class_is_valuetype, (const Il2CppClass*))                                          \
+    X(Il2CppClass*, il2cpp_object_get_class, (Il2CppObject*))
 
 namespace NCMK {
 namespace IL2CPP {

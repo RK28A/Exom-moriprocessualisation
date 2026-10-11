@@ -36,8 +36,13 @@ struct MethodInfo {
     uint32_t flags;
     const Type* params[4];
     InvokeFn invoke; /* used by il2cpp_runtime_invoke */
+    const Type* ret;  /* NULL = System.Void */
+    int throws;       /* il2cpp_runtime_invoke reports a NullReferenceException */
 };
-typedef struct { const Class* klass; const char* name; int offset; int size; int isLiteral; int64_t literal; } Field;
+typedef struct {
+    const Class* klass; const char* name; int offset; int size; int isLiteral; int64_t literal;
+    const Type* type; int flags; const void* staticData;
+} Field;
 typedef struct { int32_t length; uint16_t chars[128]; } String;
 typedef struct { void* klass; void* monitor; int32_t value; } BoxedInt;
 typedef struct { void* klass; void* monitor; int32_t handle; } BoxedScene;
@@ -74,11 +79,15 @@ static const Type kTypeBoolRef = {"System.Boolean&", 0x02};
 static const Type kTypeSingleRef = {"System.Single&", 0x0c};
 static const Type kTypeVector3Ref = {"UnityEngine.Vector3&", 0x11};
 static const Type kTypeQuaternionRef = {"UnityEngine.Quaternion&", 0x11};
+static const Type kTypeVoid = {"System.Void", 0x01};
+static const Type kTypeBool = {"System.Boolean", 0x02};
+static const Type kTypeObject = {"System.Object", 0x1c};
 
 enum {
     C_APPLICATION, C_TIME, C_GAMEMANAGER, C_SYNCCTX, C_SCENEMANAGER, C_SCENE, C_UIBEHAVIOUR, C_EVENTSYSTEM,
     C_OVRMANAGER, C_OVRBASE, C_OVRINPUT, C_BUTTON, C_CONTROLLER, C_AXIS1D,
-    C_VECTOR3, C_QUATERNION, C_XRDEVICES, C_XRDEVICE, C_XRNODE, C_COUNT
+    C_VECTOR3, C_QUATERNION, C_XRDEVICES, C_XRDEVICE, C_XRNODE,
+    C_EXCEPTION, C_NRE, C_SLMANAGER, C_SLOADER, C_SCENEUTILITY, C_COUNT
 };
 static const Class kClasses[C_COUNT] = {
     [C_APPLICATION] = {&kImages[IMG_CORE], "UnityEngine", "Application", 0, 0, {"UnityEngine.Application", 0x12}, 0},
@@ -106,6 +115,14 @@ static const Class kClasses[C_COUNT] = {
     [C_XRDEVICES] = {&kImages[IMG_XR], "UnityEngine.XR", "InputDevices", 0, 0, {"UnityEngine.XR.InputDevices", 0x12}, 0},
     [C_XRDEVICE] = {&kImages[IMG_XR], "UnityEngine.XR", "InputDevice", 0, 0, {"UnityEngine.XR.InputDevice", 0x11}, 0},
     [C_XRNODE] = {&kImages[IMG_XR], "UnityEngine.XR", "XRNode", 0, 0, {"UnityEngine.XR.XRNode", 0x11}, &kTypeI4},
+    /* Scene loader diagnostics: a manager whose IsGlobalLoadingScreen() throws, like on the device. */
+    [C_EXCEPTION] = {&kImages[IMG_CORLIB], "System", "Exception", 0, 0, {"System.Exception", 0x12}, 0},
+    [C_NRE] = {&kImages[IMG_CORLIB], "System", "NullReferenceException", &kClasses[C_EXCEPTION], 0,
+               {"System.NullReferenceException", 0x12}, 0},
+    [C_SLMANAGER] = {&kImages[IMG_CSHARP], "", "bl_SceneLoaderManager", 0, 0, {"bl_SceneLoaderManager", 0x12}, 0},
+    [C_SLOADER] = {&kImages[IMG_CSHARP], "", "bl_SceneLoader", 0, 0, {"bl_SceneLoader", 0x12}, 0},
+    [C_SCENEUTILITY] = {&kImages[IMG_CORE], "UnityEngine.SceneManagement", "SceneUtility", 0, 0,
+                        {"UnityEngine.SceneManagement.SceneUtility", 0x12}, 0},
 };
 
 static String* make_string(const char* s) {
@@ -145,6 +162,26 @@ static void* scene_get_name(void* o, void** a) {
     return make_string(*(int32_t*)a[0] == 1 ? "MainMenu" : "Club");
 }
 static void* returns_null(void* o, void** a) { (void)o; (void)a; return NULL; }
+
+/* Scene loader diagnostics. */
+static long g_sloader_awake_calls = 0;
+static int g_load_async_target = -1;
+static void sloader_awake_original(void* self, const MethodInfo* m) { (void)self; (void)m; ++g_sloader_awake_calls; }
+static void* exception_message(void* o, void** a) { (void)o; (void)a; return make_string("Object reference not set to an instance of an object."); }
+static void* scene_count(void* o, void** a) { (void)o; (void)a; return box_int(2); }
+static void* scene_build_index(void* o, void** a) { (void)o; return box_int(*(int32_t*)a[0] == 1 ? 0 : 1); }
+static void* scene_path(void* o, void** a) {
+    (void)o;
+    int i = *(int32_t*)a[0];
+    return i == 0 ? make_string("Assets/Scenes/MainMenu.unity") : i == 1 ? make_string("Assets/Scenes/Club.unity") : make_string("");
+}
+static void* load_scene_async(void* o, void** a) {
+    (void)o;
+    g_load_async_target = *(int32_t*)a[0];
+    fprintf(stderr, "[fake il2cpp] SceneManager.LoadSceneAsync(%d)\n", g_load_async_target);
+    void** op = calloc(1, 32);
+    return op;
+}
 
 /* OVRInput.Update(): counted; OVRManager.instance: null (the game drives hands with HurricaneVR). */
 static long g_ovr_input_updates = 0;
@@ -205,7 +242,9 @@ static void ovr_manager_update_thunk(void* self, const MethodInfo* m) { ovr_mana
 #define T(c) (&kClasses[c].self)
 enum { M_UNITYVER, M_APPVER, M_FRAMECOUNT, M_EXECUTETASKS, M_GETACTIVESCENE, M_SCENENAME, M_ESUPDATE, M_OVRUPDATE,
        M_GET_BUTTON, M_GET_AXIS, M_GETDOWN, M_DESCRIBE, M_OVRINPUT_UPDATE, M_OVRMANAGER_INSTANCE,
-       M_XR_DEVICE_AT_NODE, M_XR_TRY_BOOL, M_XR_TRY_VEC3, M_XR_TRY_QUAT, M_COUNT };
+       M_XR_DEVICE_AT_NODE, M_XR_TRY_BOOL, M_XR_TRY_VEC3, M_XR_TRY_QUAT,
+       M_EXC_MESSAGE, M_SL_ISGLOBAL, M_SL_LOADBYID, M_SLOADER_AWAKE, M_SCENECOUNT, M_SCENEBUILDINDEX, M_SCENEPATH,
+       M_LOADSCENEASYNC, M_COUNT };
 static MethodInfo kMethods[M_COUNT] = {
     [M_UNITYVER] = {0, 0, 0, "get_unityVersion", &kClasses[C_APPLICATION], 0, STATIC, {0}, unity_version},
     [M_APPVER] = {0, 0, 0, "get_version", &kClasses[C_APPLICATION], 0, STATIC, {0}, app_version},
@@ -232,7 +271,19 @@ static MethodInfo kMethods[M_COUNT] = {
                        {&kTypeU8, &kTypeString, &kTypeVector3Ref}, xr_try_vec3},
     [M_XR_TRY_QUAT] = {0, 0, 0, "TryGetFeatureValue_Quaternionf", &kClasses[C_XRDEVICES], 3, STATIC,
                        {&kTypeU8, &kTypeString, &kTypeQuaternionRef}, xr_try_quat},
+    [M_EXC_MESSAGE] = {0, 0, 0, "get_Message", &kClasses[C_EXCEPTION], 0, 0, {0}, exception_message, &kTypeString},
+    [M_SL_ISGLOBAL] = {0, 0, 0, "IsGlobalLoadingScreen", &kClasses[C_SLMANAGER], 0, STATIC, {0}, returns_null, &kTypeBool, 1},
+    [M_SL_LOADBYID] = {(void*)returns_null, (void*)returns_null, 0, "LoadSceneByID", &kClasses[C_SLMANAGER], 1, STATIC,
+                       {&kTypeI4}, returns_null, 0, 1},
+    [M_SLOADER_AWAKE] = {(void*)sloader_awake_original, (void*)sloader_awake_original, 0, "Awake", &kClasses[C_SLOADER], 0, 0,
+                         {0}, returns_null},
+    [M_SCENECOUNT] = {0, 0, 0, "get_sceneCountInBuildSettings", &kClasses[C_SCENEMANAGER], 0, STATIC, {0}, scene_count, &kTypeI4},
+    [M_SCENEBUILDINDEX] = {0, 0, 0, "GetBuildIndexInternal", &kClasses[C_SCENE], 1, STATIC, {&kTypeI4}, scene_build_index, &kTypeI4},
+    [M_SCENEPATH] = {0, 0, 0, "GetScenePathByBuildIndex", &kClasses[C_SCENEUTILITY], 1, STATIC, {&kTypeI4}, scene_path, &kTypeString},
+    [M_LOADSCENEASYNC] = {0, 0, 0, "LoadSceneAsync", &kClasses[C_SCENEMANAGER], 1, STATIC, {&kTypeI4}, load_scene_async, &kTypeObject},
 };
+static const void* g_null_ref = NULL;
+static const int32_t g_use_global = 1;
 static const void* kOriginalSlots[3][2] = {
     {(void*)execute_tasks_original, (void*)execute_tasks_original},
     {(void*)event_system_update_original, (void*)event_system_update_original},
@@ -258,6 +309,8 @@ static const Field kFields[] = {
     {&kClasses[C_BUTTON], "Any", 0, 4, 1, -1},
     {&kClasses[C_CONTROLLER], "LTouch", 0, 4, 1, 1},
     {&kClasses[C_CONTROLLER], "RTouch", 0, 4, 1, 2},
+    {&kClasses[C_SLMANAGER], "m_Instance", 0, 8, 0, 0, &kClasses[C_SLMANAGER].self, 0x10, &g_null_ref},
+    {&kClasses[C_SLMANAGER], "useGlobalLoadingScreen", 0, 1, 0, 0, &kTypeBool, 0x10, &g_use_global},
 };
 
 /* ---- time icalls ---- */
@@ -277,12 +330,22 @@ void fake_run_frame(const char* targets) {
         ((void (*)(void*, const MethodInfo*))kMethods[M_ESUPDATE].methodPointer)(&es1, &kMethods[M_ESUPDATE]);
         ((void (*)(void*, const MethodInfo*))kMethods[M_ESUPDATE].methodPointer)(&es2, &kMethods[M_ESUPDATE]);
     }
+    /* A scene's bl_SceneLoader.Awake(), invoked by the engine through slot 0 every 100 frames. */
+    if (g_frame % 100 == 50) {
+        static int loader_obj;
+        ((void (*)(void*, const MethodInfo*))kMethods[M_SLOADER_AWAKE].methodPointer)(&loader_obj, &kMethods[M_SLOADER_AWAKE]);
+    }
     if (targets && strstr(targets, "OVRManager")) {
         static int ovr;
         ((void (*)(void*, const MethodInfo*))kMethods[M_OVRUPDATE].methodPointer)(&ovr, &kMethods[M_OVRUPDATE]);
     }
 }
 int fake_frame(void) { return g_frame; }
+long fake_sloader_awake_calls(void) { return g_sloader_awake_calls; }
+int fake_sloader_awake_slots_original(void) {
+    return kMethods[M_SLOADER_AWAKE].methodPointer == (void*)sloader_awake_original &&
+           kMethods[M_SLOADER_AWAKE].virtualMethodPointer == (void*)sloader_awake_original;
+}
 int fake_original_ran_this_frame(void) { return g_last_original_frame == g_frame; }
 long fake_original_calls(int i) { return g_original_calls[i]; }
 int fake_live_gchandles(void) { return g_live_handles; }
@@ -348,6 +411,29 @@ const MethodInfo* il2cpp_class_get_methods(const Class* c, void** iter) {
 const char* il2cpp_method_get_name(const MethodInfo* m) { return m->name; }
 uint32_t il2cpp_method_get_param_count(const MethodInfo* m) { return (uint32_t)m->argc; }
 const Type* il2cpp_method_get_param(const MethodInfo* m, uint32_t i) { return i < 4 ? m->params[i] : NULL; }
+const Type* il2cpp_method_get_return_type(const MethodInfo* m) { return m->ret ? m->ret : &kTypeVoid; }
+const Class* il2cpp_class_from_type(const Type* t) {
+    for (size_t k = 0; k < C_COUNT; ++k)
+        if (&kClasses[k].self == t) return &kClasses[k];
+    return NULL;
+}
+int il2cpp_class_is_valuetype(const Class* c) { return c->self.type == 0x11; }
+const Class* il2cpp_object_get_class(void* o) { return o ? *(const Class**)o : NULL; }
+const Class* il2cpp_image_get_class(const Image* i, size_t index) {
+    for (size_t k = 0; k < C_COUNT; ++k)
+        if (kClasses[k].image == i && index-- == 0) return &kClasses[k];
+    return NULL;
+}
+const Field* il2cpp_class_get_fields(const Class* c, void** iter) {
+    size_t i = (size_t)*iter, n = sizeof(kFields) / sizeof(kFields[0]);
+    for (; i < n; ++i)
+        if (kFields[i].klass == c) { *iter = (void*)(i + 1); return &kFields[i]; }
+    *iter = (void*)n;
+    return NULL;
+}
+const char* il2cpp_field_get_name(const Field* f) { return f->name; }
+const Type* il2cpp_field_get_type(const Field* f) { return f->type ? f->type : &kTypeI4; }
+int il2cpp_field_get_flags(const Field* f) { return f->flags | (f->isLiteral ? 0x50 : 0); }
 uint32_t il2cpp_method_get_flags(const MethodInfo* m, uint32_t* iflags) {
     if (iflags) *iflags = 0;
     return m->flags;
@@ -362,6 +448,7 @@ void il2cpp_field_get_value(void* obj, const Field* f, void* out) { memcpy(out, 
 void il2cpp_field_set_value(void* obj, const Field* f, void* value) { memcpy((char*)obj + f->offset, value, (size_t)f->size); }
 void il2cpp_field_static_get_value(const Field* f, void* out) {
     if (f->isLiteral) memcpy(out, &f->literal, (size_t)f->size); /* little-endian: low bytes */
+    else if (f->staticData) memcpy(out, f->staticData, (size_t)f->size);
 }
 
 void* il2cpp_resolve_icall(const char* name) {
@@ -375,6 +462,12 @@ void* il2cpp_resolve_icall(const char* name) {
 
 void* il2cpp_runtime_invoke(const MethodInfo* m, void* obj, void** args, void** exc) {
     if (exc) *exc = NULL;
+    if (m->throws) {
+        void** e = calloc(1, 64);
+        e[0] = (void*)&kClasses[C_NRE];
+        if (exc) *exc = e;
+        return NULL;
+    }
     return m->invoke ? m->invoke(obj, args) : NULL;
 }
 void* il2cpp_object_new(const Class* c) {

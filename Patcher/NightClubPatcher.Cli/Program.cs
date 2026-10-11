@@ -56,6 +56,10 @@ internal static class Program
         Options
           --allow-unverified           Allow patching builds whose fingerprints are not verified
           --no-mods                    Do not embed libncmkmod_*.so into the APK
+          --scene-loader-diagnostics on|off
+                                       Loader logs bl_SceneLoaderManager / Meta platform / storage state (default on)
+          --scene-loader-recovery on|off
+                                       After a confirmed scene loader failure, one SceneManager fallback (default off)
           --loader <path>              Use a specific libncmkloader.so
           --mods keep|disable|delete   What to do with NCMKMods on restore (default: ask)
           --no-install                 (with --unpatch) only build the APK
@@ -135,7 +139,20 @@ internal static class Program
         AllowUnverified = args.Contains("--allow-unverified"),
         EmbedMods = !args.Contains("--no-mods"),
         LoaderPath = Value(args, "--loader"),
+        SceneLoaderDiagnostics = OnOff(args, "--scene-loader-diagnostics", true),
+        SceneLoaderRecovery = OnOff(args, "--scene-loader-recovery", false),
     };
+
+    private static bool OnOff(string[] args, string flag, bool fallback)
+    {
+        if (!args.Contains(flag)) return fallback;
+        return Value(args, flag) switch
+        {
+            "on" => true,
+            "off" => false,
+            _ => throw new ArgumentException($"Usage: {flag} on|off"),
+        };
+    }
 
     private static int Run(ModKitService svc, IUserInteraction ui, string[] args)
     {

@@ -89,6 +89,19 @@ public partial class MainWindow : Window
     public bool AllowUnverified { get; set; }
     public bool EmbedMods { get; set; } = true;
 
+    /// <summary>Loader diagnostics toggles (Advanced), saved in the GUI settings, embedded at the next patch.</summary>
+    public bool SceneLoaderDiagnostics
+    {
+        get => _settings.SceneLoaderDiagnostics;
+        set { if (_settings.SceneLoaderDiagnostics == value) return; _settings.SceneLoaderDiagnostics = value; _settings.Save(); }
+    }
+
+    public bool SceneLoaderRecovery
+    {
+        get => _settings.SceneLoaderRecovery;
+        set { if (_settings.SceneLoaderRecovery == value) return; _settings.SceneLoaderRecovery = value; _settings.Save(); }
+    }
+
     private readonly GuiSettings _settings = GuiSettings.Load();
     private bool _loadingSettings;
 
@@ -571,7 +584,13 @@ public partial class MainWindow : Window
         await RefreshAsync();
     }
 
-    private PatchOptions Options() => new() { AllowUnverified = AllowUnverified, EmbedMods = EmbedMods };
+    private PatchOptions Options() => new()
+    {
+        AllowUnverified = AllowUnverified,
+        EmbedMods = EmbedMods,
+        SceneLoaderDiagnostics = SceneLoaderDiagnostics,
+        SceneLoaderRecovery = SceneLoaderRecovery,
+    };
 
     /// <summary>Shows which libncmkmod_*.so will be embedded; false when the user cancels.</summary>
     private bool ConfirmEmbeddedMods(string action)

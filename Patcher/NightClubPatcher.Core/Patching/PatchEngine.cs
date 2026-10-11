@@ -25,6 +25,21 @@ public sealed class PatchOptions
 
     /// <summary>Headset chosen before patching, recorded in build.json.</summary>
     public string? TargetDevice { get; set; }
+
+    /// <summary>Loader: log bl_SceneLoaderManager metadata/state, Meta platform and storage checks (behaviour unchanged).</summary>
+    public bool SceneLoaderDiagnostics { get; init; } = true;
+
+    /// <summary>Loader: after a confirmed scene loader failure, one SceneManager.LoadSceneAsync fallback (default off).</summary>
+    public bool SceneLoaderRecovery { get; init; }
+
+    /// <summary>assets/NCMK/loader.json: defaults the loader uses when NCMKMods/Config/config.json cannot be read.</summary>
+    public string LoaderConfigJson() =>
+        "{\n  \"loader\": {\n" +
+        $"    \"sceneLoaderDiagnostics\": {(SceneLoaderDiagnostics ? "true" : "false")},\n" +
+        $"    \"sceneLoaderRecovery\": {(SceneLoaderRecovery ? "true" : "false")},\n" +
+        $"    \"metaPlatformDiagnostics\": {(SceneLoaderDiagnostics ? "true" : "false")},\n" +
+        $"    \"storageDiagnostics\": {(SceneLoaderDiagnostics ? "true" : "false")}\n" +
+        "  }\n}\n";
 }
 
 /// <param name="NeedsPin">The build's fingerprints are not pinned yet; pinning them from the verified backup lets the patch continue.</param>
@@ -104,7 +119,10 @@ public sealed class PatchEngine
 
             var mods = PlannedMods(options, loaderPath).Select(m => m.Path).ToList();
             _log.Info(mods.Count == 0 ? "Embedded mods: none" : "Embedded mods: " + string.Join(", ", mods.Select(Path.GetFileName)));
-            var (injected, loaderSha) = BuildUnsignedPatchedApk(zip, original, loaderBytes, mods, ws, _log);
+            var (injected, loaderSha) = BuildUnsignedPatchedApk(zip, original, loaderBytes, mods, ws, _log,
+                System.Text.Encoding.UTF8.GetBytes(options.LoaderConfigJson()));
+            _log.Info($"Loader settings: scene loader diagnostics {(options.SceneLoaderDiagnostics ? "ON" : "off")}, " +
+                      $"recovery {(options.SceneLoaderRecovery ? "ON" : "off")} ({GameConstants.LoaderConfigEntry})");
             var unsigned = Path.Combine(ws.Patched, "unsigned.apk");
 
             var signed = Path.Combine(ws.Output, "patched.apk");
@@ -142,7 +160,8 @@ public sealed class PatchEngine
     /// marker, written to ws.Patched/unsigned.apk. Never touches the source file.
     /// </summary>
     internal static (List<string> injected, string loaderSha) BuildUnsignedPatchedApk(
-        ZipArchiveReader zip, ApkAnalysis original, byte[] loaderBytes, IReadOnlyList<string> modFiles, PatchWorkspace ws, KitLog log)
+        ZipArchiveReader zip, ApkAnalysis original, byte[] loaderBytes, IReadOnlyList<string> modFiles, PatchWorkspace ws, KitLog log,
+        byte[]? loaderConfig = null)
     {
         log.Step("Extracting libmain.so");
         var libmainEntry = zip.Find(GameConstants.LibMainEntry) ?? throw new InvalidDataException("libmain.so missing");
@@ -183,6 +202,8 @@ public sealed class PatchEngine
             PatchedAt = DateTimeOffset.Now,
         };
         plan.AddOrReplace(GameConstants.PatchMarkerEntry, System.Text.Encoding.UTF8.GetBytes(Json.Serialize(marker)), EntryCompression.Deflated, zip);
+        // The loader reads this STORED entry straight from base.apk (no inflate in the loader).
+        if (loaderConfig != null) plan.AddOrReplace(GameConstants.LoaderConfigEntry, loaderConfig, EntryCompression.Stored, zip);
 
         if (original.Manifest.ExtractNativeLibs == false)
             log.Info("extractNativeLibs=false: native libraries are stored uncompressed and page-aligned.");
@@ -202,6 +223,7 @@ public sealed class PatchEngine
         plan.ReplaceEntry(GameConstants.LibMainEntry, originalLibMain);
         plan.Remove.UnionWith(GameConstants.AllLoaderEntries);
         plan.Remove.UnionWith(GameConstants.AllPatchMarkerEntries);
+        plan.Remove.Add(GameConstants.LoaderConfigEntry);
         plan.RemoveWhere.Add(GameConstants.IsModLibEntry);
         foreach (var lib in marker?.InjectedLibraries ?? new())
             plan.Remove.Add(GameConstants.LibDir + lib);

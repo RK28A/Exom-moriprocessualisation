@@ -77,6 +77,20 @@ expect "$LOG" "[host_game] before shutdown: original slots ExecuteTasks=1 EventS
 expect "$LOG" "Dispatcher stopped: MethodInfo pointers restored"
 expect "$LOG" "[host_game] after shutdown: original slots ExecuteTasks=1 EventSystem=1 OVRManager=1"
 expect "$LOG" "[host_game] post-unload frame ok: yes"
+# Scene loader / platform / storage diagnostics (default ON, behaviour unchanged).
+expect "$LOG" "[NCMK][SceneLoader] bl_SceneLoaderManager found"
+expect "$LOG" "[NCMK][SceneLoader] field m_Instance"
+expect "$LOG" "[NCMK][SceneLoader] LoadSceneByID resolved"
+expect "$LOG" "[NCMK][SceneLoader] IsGlobalLoadingScreen resolved"
+expect "$LOG" "[NCMK][SceneLoader] bl_SceneLoader.Awake probe installed"
+expect "$LOG" "[NCMK][SceneLoader] bl_SceneLoader.Awake begins"
+expect "$LOG" "[NCMK][SceneLoader] NULL FIELD: static m_Instance (bl_SceneLoaderManager) = NULL"
+expect "$LOG" "[NCMK][SceneLoader] IsGlobalLoadingScreen() threw System.NullReferenceException: Object reference not set"
+expect "$LOG" "[NCMK][SceneLoader] recovery off"
+expect "$LOG" "[NCMK][Storage] /sdcard/Android/obb/com.mandegames.NightClubSimulater"
+expect "$LOG" "[NCMK][MetaPlatform] Oculus.Platform.PlatformSettings not found"
+expect "$LOG" "slots restored: yes"
+reject "$LOG" "attempting SceneManager fallback"
 test -f "$MODS_ROOT/Logs/latest.log" && echo "PASS  latest.log written" || { echo "FAIL  latest.log"; FAILED=1; }
 test -f "$MODS_ROOT/Config/config.json" && echo "PASS  default config.json created" || { echo "FAIL  config.json"; FAILED=1; }
 test -f "$MODS_ROOT/Config/ncmk.debugoverlay.cfg" && echo "PASS  NCMK::Config wrote ncmk.debugoverlay.cfg" || { echo "FAIL  mod config"; FAILED=1; }
@@ -124,6 +138,33 @@ LOG3="$BUILD/host_game_wrongpkg.log"
 run "$LOG3" NCMK_HOST_PACKAGE=com.example.other HOST_GAME_SECONDS=1
 expect "$LOG3" "loader stays idle"
 reject "$LOG3" "STAGE 03"
+
+# 7b) Diagnostics with every mod disabled (device "Test A/B"): the dispatcher is still installed for
+#     the diagnostics only, and recovery (on) loads the configured scene once after a confirmed failure.
+cat > "$MODS_ROOT/Config/config.json" <<'JSON'
+{
+  "loader": { "logging": true, "safeMode": false, "sceneLoaderDiagnostics": true, "sceneLoaderRecovery": true,
+              "sceneLoaderRecoveryScene": 0, "sceneLoaderRecoveryDelaySeconds": 1 },
+  "mods": { "ncmk.helloworld": false, "ncmk.debugoverlay": false, "ncs.legacytest": false, "ncmk.test.frametest": false }
+}
+JSON
+LOG8="$BUILD/host_game_recovery.log"
+run "$LOG8" HOST_FRAME_TARGETS="ExecuteTasks" HOST_GAME_SECONDS=4
+expect "$LOG8" "0 mod(s) loaded"
+expect "$LOG8" "STAGE 09 Main-thread dispatcher: hooked UnityEngine.CoreModule"
+expect "$LOG8" "sceneLoaderRecovery=1 recoveryScene=0 recoveryDelay=1s"
+expect "$LOG8" "[NCMK][SceneLoader] recovery ON"
+expect "$LOG8" "[NCMK][SceneLoader] attempting SceneManager fallback"
+expect "$LOG8" "[fake il2cpp] SceneManager.LoadSceneAsync(0)"
+expect "$LOG8" "[NCMK][SceneLoader] LoadSceneAsync(0) 'Assets/Scenes/MainMenu.unity' started"
+reject "$LOG8" "Input: no OVRManager instance"
+# Default target (active index + 1) is out of range in the fake build: refused, nothing loaded.
+sed -i 's/"sceneLoaderRecoveryScene": 0/"sceneLoaderRecoveryScene": -1/' "$MODS_ROOT/Config/config.json"
+LOG9="$BUILD/host_game_recovery_refused.log"
+run "$LOG9" HOST_FRAME_TARGETS="ExecuteTasks" HOST_GAME_SECONDS=4
+expect "$LOG9" "[NCMK][SceneLoader] Recovery refused: invalid sceneID 2"
+reject "$LOG9" "[fake il2cpp] SceneManager.LoadSceneAsync"
+rm -f "$MODS_ROOT/Config/config.json"
 
 # 8) Drop-in mod: a mod is ONE folder in Mods/ (mod.json + .cpp). Built in a temporary copy of the
 #    kit, so no tracked file changes. Also: .disabled folders, folders without mod.json, stale
