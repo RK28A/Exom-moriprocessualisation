@@ -83,6 +83,7 @@ Legend: ✅ implemented and covered by automated tests · 🟡 implemented, **ne
 | 65 | Storage / OBB diagnostics from the game process (obb folder, files readable or not, Application.dataPath) + Diagnose lists the device OBB folder and storage permissions | 🟡 needs on-device verification | `PlatformDiagnostics.cpp`, `ModKitService.Diagnose` |
 | 66 | Loader settings embedded in the APK (`assets/NCMK/loader.json`, STORED) so diagnostics toggles work when NCMKMods is not readable; `config.json` overrides; CLI `--scene-loader-diagnostics/--scene-loader-recovery on\|off`, Advanced checkboxes | ✅ unit + zip read test / 🟡 needs on-device verification | `PatchOptions.LoaderConfigJson`, `LoadEmbeddedConfig` |
 | 67 | OBB (game content) saved before the signature-change uninstall and put back after (size + MD5), saved by Backup Original, restored when missing; `pm grant READ_EXTERNAL_STORAGE` best effort. Fixes the game stuck in `Loading` (OBB deleted, Resources missing) | ✅ fake adb / 🟡 needs on-device verification | `ObbService`, `InstallService` |
+| 68 | IL2CPP dump on request: `@ncmk` command socket in the loader (adb forward localabstract), progressive dump.cs (classes, fields + offsets, enum values, properties, methods + RVA/offset/VA) streamed to the PC Downloads folder; GUI Advanced button, CLI `--dump` | ✅ host (fake runtime, real socket) / 🟡 needs on-device verification (adb forward to an app abstract socket on Horizon OS) | `il2cpp_dump.cpp`, `command_server.cpp`, `DumpService.cs` |
 
 ## Next steps, in order
 

@@ -585,6 +585,16 @@ public sealed class ModKitService
 
     // ------------------------------------------------------------------ device helpers
 
+    /// <summary>
+    /// Dumps the running game's IL2CPP metadata (classes, fields + offsets, methods + RVA/offset/VA) through the
+    /// NCMK loader and saves it on the PC (Downloads by default).
+    /// </summary>
+    public async Task<Remote.DumpResult> DumpGameAsync(string? outputDir = null, CancellationToken ct = default)
+    {
+        if (!ConnectDevice(out var msg)) return new Remote.DumpResult(false, msg);
+        return await new Remote.DumpService(Adb, Log).DumpAsync(outputDir, ct);
+    }
+
     public bool Launch()
     {
         if (!ConnectDevice(out var msg)) { Log.Error(msg); return false; }

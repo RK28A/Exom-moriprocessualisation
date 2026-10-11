@@ -257,6 +257,18 @@ public partial class AdvancedWindow : Window
         _main.Report("Import original", r.Outcome == Core.Backup.BackupOutcome.Created, r.Message);
     }
 
+    private async void Dump_Click(object sender, RoutedEventArgs e) =>
+        await _main.RunAsync("Dumping the game", async () =>
+        {
+            var r = await Task.Run(() => _svc.DumpGameAsync());
+            _main.Report("DUMP", r.Ok, r.Message);
+            if (r.Ok && r.FilePath != null)
+            {
+                try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{r.FilePath}\"") { UseShellExecute = true }); }
+                catch { /* the path is in the report */ }
+            }
+        });
+
     private async void PushMods_Click(object sender, RoutedEventArgs e) =>
         await _main.RunAsync("Pushing mods and config", () => Task.Run(() => _svc.PushModsAndConfig().Ok));
 

@@ -432,6 +432,10 @@ const Field* il2cpp_class_get_fields(const Class* c, void** iter) {
     return NULL;
 }
 const char* il2cpp_field_get_name(const Field* f) { return f->name; }
+size_t il2cpp_field_get_offset(const Field* f) { return (size_t)f->offset; }
+int il2cpp_class_get_flags(const Class* c) { (void)c; return 1; /* public */ }
+int il2cpp_class_is_enum(const Class* c) { return c->enumBase != NULL; }
+const char* il2cpp_method_get_param_name(const MethodInfo* m, uint32_t i) { (void)m; return i == 0 ? "value" : "arg"; }
 const Type* il2cpp_field_get_type(const Field* f) { return f->type ? f->type : &kTypeI4; }
 int il2cpp_field_get_flags(const Field* f) { return f->flags | (f->isLiteral ? 0x50 : 0); }
 uint32_t il2cpp_method_get_flags(const MethodInfo* m, uint32_t* iflags) {

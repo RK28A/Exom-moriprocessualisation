@@ -255,6 +255,7 @@ void ApplyLoaderJson(LoaderConfig& cfg, const std::string& json) {
     cfg.sceneLoaderRecoveryDelay = ReadInt(json, "sceneLoaderRecoveryDelaySeconds", cfg.sceneLoaderRecoveryDelay, from);
     cfg.metaPlatformDiagnostics = ReadBool(json, "metaPlatformDiagnostics", cfg.metaPlatformDiagnostics, from);
     cfg.storageDiagnostics = ReadBool(json, "storageDiagnostics", cfg.storageDiagnostics, from);
+    cfg.remoteCommands = ReadBool(json, "remoteCommands", cfg.remoteCommands, from);
 }
 
 std::string ApkPathFromLibrary(const std::string& libPath) {

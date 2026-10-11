@@ -21,6 +21,7 @@ struct LoaderConfig {
     int sceneLoaderRecoveryDelay = 10;    // seconds stuck in the same scene before the fallback
     bool metaPlatformDiagnostics = true;  // log Oculus.Platform app id / init state (read-only)
     bool storageDiagnostics = true;       // log OBB / external storage access from the game process
+    bool remoteCommands = true;           // @ncmk socket: lets the PC request an IL2CPP dump (read-only)
     std::string source = "defaults";      // where the values came from (logged)
 };
 

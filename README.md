@@ -413,6 +413,19 @@ Test flow on the headset (keep the logcat of each run):
 2. **B** - diagnostics on, recovery on, no mods: does the fallback get past `Loading`?
 3. **C** - mods back on once scene loading is stable.
 
+## IL2CPP dump (Advanced > Dump game)
+
+With the patched game running on the connected headset, **Advanced > Builds & Recovery > Dump game**
+(or `NightClubPatcher.Cli.exe --dump [folder]`) writes `NCMK-dump-<version>-<date>.cs` to your
+**Downloads** folder: every assembly and class (namespace, modifiers, parent, interfaces), fields with
+their offsets and constant / enum values, properties, and methods with parameters, RVA, file offset in
+`libil2cpp.so` and VA (Il2CppDumper `dump.cs` layout).
+
+The loader builds it inside the game on a background thread, 16 classes at a time with a short pause,
+and streams it to the PC through `adb forward tcp:0 localabstract:ncmk` (socket `@ncmk` in the game
+process; read-only, `"remoteCommands": false` in config.json turns it off). Nothing is written to the
+headset's storage. Needs a game patched with this NCMK version.
+
 ## Writing mods
 
 See [`docs/MODDING.md`](docs/MODDING.md): lifecycle and threads, every export and host-API

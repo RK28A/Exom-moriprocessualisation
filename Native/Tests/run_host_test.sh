@@ -166,6 +166,50 @@ expect "$LOG9" "[NCMK][SceneLoader] Recovery refused: invalid sceneID 2"
 reject "$LOG9" "[fake il2cpp] SceneManager.LoadSceneAsync"
 rm -f "$MODS_ROOT/Config/config.json"
 
+# 7c) PC dump command: while the game runs, a client on @ncmk (what `adb forward localabstract:ncmk`
+#     reaches) requests DUMP and receives the whole IL2CPP dump as framed chunks.
+LOG10="$BUILD/host_game_dump.log"
+DUMP_OUT="$BUILD/dump.cs"
+rm -f "$DUMP_OUT"
+( run "$LOG10" HOST_FRAME_TARGETS="ExecuteTasks" HOST_GAME_SECONDS=6 ) &
+GAME_PID=$!
+python3 - "$DUMP_OUT" <<'PY' > "$BUILD/dump_client.log" 2>&1 || true
+import socket, sys, time
+out = sys.argv[1]
+for _ in range(60):  # the loader starts listening after IL2CPP is up
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect("\0ncmk"); break
+    except OSError:
+        time.sleep(0.1)
+else:
+    print("CLIENT: no server"); sys.exit(1)
+f = s.makefile("rb")
+print("CLIENT hello:", f.readline().decode().strip())
+s.sendall(b"DUMP\n")
+progress = 0
+with open(out, "wb") as o:
+    while True:
+        line = f.readline().decode().strip()
+        if line.startswith("P "): progress += 1; continue
+        if line.startswith("D "): o.write(f.read(int(line[2:]))); continue
+        print("CLIENT end:", line, "progress lines:", progress); break
+PY
+wait $GAME_PID || true
+cat "$BUILD/dump_client.log"
+expect "$LOG10" "[NCMK][Remote] listening on @ncmk"
+expect "$LOG10" "[NCMK][Dump] dump requested by the PC"
+expect "$LOG10" "[NCMK][Dump] done:"
+expect "$BUILD/dump_client.log" "CLIENT hello: NCMK 1 0.3.0 com.mandegames.NightClubSimulater 1.1.0"
+expect "$BUILD/dump_client.log" "CLIENT end: E OK"
+expect "$DUMP_OUT" "// NCMK IL2CPP dump - com.mandegames.NightClubSimulater 1.1.0 (Unity 6000.2.2f1)"
+expect "$DUMP_OUT" "public class bl_SceneLoaderManager"
+expect "$DUMP_OUT" "static System.Boolean IsGlobalLoadingScreen() { }"
+expect "$DUMP_OUT" "static System.Void LoadSceneByID(System.Int32 value) { }"
+expect "$DUMP_OUT" "static bl_SceneLoaderManager m_Instance; // 0x0"
+expect "$DUMP_OUT" "const System.Int32 One = 1;"
+expect "$DUMP_OUT" "// RVA: 0x"
+expect "$DUMP_OUT" "// RVA: -1 Offset: -1"
+
 # 8) Drop-in mod: a mod is ONE folder in Mods/ (mod.json + .cpp). Built in a temporary copy of the
 #    kit, so no tracked file changes. Also: .disabled folders, folders without mod.json, stale
 #    output removal and duplicate output names.
