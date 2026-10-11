@@ -234,9 +234,9 @@ Il2CppObject* NewObject(Il2CppClass* klass) {
     return klass && api.il2cpp_object_new ? api.il2cpp_object_new(klass) : nullptr;
 }
 
-uint32_t Pin(Il2CppObject* obj) { return obj && api.il2cpp_gchandle_new ? api.il2cpp_gchandle_new(obj, true) : 0; }
+uintptr_t Pin(Il2CppObject* obj) { return obj && api.il2cpp_gchandle_new ? api.il2cpp_gchandle_new(obj, true) : 0; }
 
-void Unpin(uint32_t handle) {
+void Unpin(uintptr_t handle) {
     if (handle && api.il2cpp_gchandle_free) api.il2cpp_gchandle_free(handle);
 }
 

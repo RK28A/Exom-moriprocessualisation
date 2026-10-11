@@ -73,17 +73,47 @@ public class NcmkTests
     }
 
     [Fact]
-    public void Native_build_finds_mod_source_folders_and_tolerates_none()
+    public void Mod_catalog_follows_the_cmake_rules()
     {
         using var tmp = new TempDir();
         var paths = new KitPaths(tmp.File("kit"));
         var builder = new NativeBuilder(paths, new ToolLocator(paths), new KitLog(null));
-        Assert.Empty(builder.ModSourceDirs()); // no Mods/ at all: loader-only build
+        Directory.CreateDirectory(Path.Combine(paths.Root, "Native"));
+        File.WriteAllText(Path.Combine(paths.Root, "Native", "CMakeLists.txt"), "");
+        Directory.CreateDirectory(Path.Combine(paths.Root, "SDK", "Core"));
+        File.WriteAllText(Path.Combine(paths.Root, "SDK", "Core", "ncmk_mod_api.h"), "");
+        Assert.Contains("kit\\Mods is missing, re-run Build-Windows.ps1", builder.MissingSourcesMessage());
 
-        Directory.CreateDirectory(Path.Combine(paths.Root, "Mods", "HelloWorld"));
-        File.WriteAllText(Path.Combine(paths.Root, "Mods", "HelloWorld", "mod.json"), "{}"); // sources missing
-        Directory.CreateDirectory(Path.Combine(paths.Root, "Mods", "DebugOverlay"));
-        File.WriteAllText(Path.Combine(paths.Root, "Mods", "DebugOverlay", "debug_overlay.cpp"), "");
-        Assert.Equal(new[] { "DebugOverlay" }, builder.ModSourceDirs().Select(Path.GetFileName));
+        void Mod(string folder, string? json, params string[] files)
+        {
+            var d = Path.Combine(paths.Root, "Mods", folder);
+            Directory.CreateDirectory(d);
+            if (json != null) File.WriteAllText(Path.Combine(d, "mod.json"), json);
+            foreach (var f in files)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(d, f))!);
+                File.WriteAllText(Path.Combine(d, f), "");
+            }
+        }
+        Mod("Pulse", "{\"library\":\"libncmkmod_pulse.so\"}", "pulse.cpp", "ui/panel.cpp");
+        Mod("Glow Fx", "{}", "glow.cpp");                     // default name from the folder
+        Mod("NoJson", null, "x.cpp");                         // ignored
+        Mod("Off", "{}", "off.cpp", ".disabled");
+        Mod("Empty", "{}");
+        Assert.Null(builder.MissingSourcesMessage());
+
+        var mods = builder.DiscoverMods();
+        Assert.Equal(new[] { "Empty", "Glow Fx", "Off", "Pulse" }, mods.Select(m => m.Name));
+        var pulse = mods.Single(m => m.Name == "Pulse");
+        Assert.Equal(("libncmkmod_pulse.so", 2, true), (pulse.Library, pulse.SourceCount, pulse.WillBuild));
+        Assert.Equal("libncmkmod_glow_fx.so", mods.Single(m => m.Name == "Glow Fx").Library);
+        Assert.False(mods.Single(m => m.Name == "Off").WillBuild);
+        Assert.False(mods.Single(m => m.Name == "Empty").WillBuild);
+
+        Mod("Pulse2", "{\"library\":\"libncmkmod_pulse.so\"}", "p.cpp");
+        Mod("Bad", "{\"library\":\"libfoo.so\"}", "b.cpp");
+        mods = builder.DiscoverMods();
+        Assert.Contains("same output libncmkmod_pulse.so as Mods/Pulse2", mods.Single(m => m.Name == "Pulse").Error);
+        Assert.Contains("must look like libncmkmod_<name>.so", mods.Single(m => m.Name == "Bad").Error);
     }
 }

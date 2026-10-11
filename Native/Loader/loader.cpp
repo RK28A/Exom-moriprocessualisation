@@ -37,6 +37,7 @@
 #include "../Il2Cpp/il2cpp_api.h"
 #include "../Logging/ncmk_log.h"
 #include "../Plugins/plugin_manager.h"
+#include "../Unity/input_pump.h"
 #include "../Unity/unity_runtime.h"
 #include "environment.h"
 
@@ -170,8 +171,8 @@ NCMKMethod* HostFindMethodBySignature(NCMKClass* k, const char* n, const char* c
 NCMKClass* HostFindNestedClass(NCMKClass* outer, const char* n) { return IL::FindNestedClass(static_cast<Il2CppClass*>(outer), n); }
 NCMKObject* HostTypeOf(NCMKClass* k) { return IL::TypeOf(static_cast<Il2CppClass*>(k)); }
 NCMKObject* HostNewObject(NCMKClass* k) { return IL::NewObject(static_cast<Il2CppClass*>(k)); }
-uint32_t HostPin(NCMKObject* o) { return IL::Pin(static_cast<Il2CppObject*>(o)); }
-void HostUnpin(uint32_t h) { IL::Unpin(h); }
+uintptr_t HostPin(NCMKObject* o) { return IL::Pin(static_cast<Il2CppObject*>(o)); }
+void HostUnpin(uintptr_t h) { IL::Unpin(h); }
 int64_t HostGetEnumValue(NCMKClass* k, const char* n, int64_t fallback) {
     return IL::GetEnumValue(static_cast<Il2CppClass*>(k), n, fallback);
 }
@@ -222,6 +223,7 @@ void BuildHostApi() {
 // Unity main thread, once per frame (called by the dispatcher).
 void OnFrame(const ncmk::hooks::Frame& f) {
     if (g_stopping.load()) return;
+    ncmk::input::PumpFrame();  // OVRInput.Update() when the game has no OVRManager
     G().plugins.FrameAll(f.deltaTime, f.fixedSteps, f.sceneLoaded);
 }
 

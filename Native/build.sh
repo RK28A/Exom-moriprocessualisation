@@ -6,6 +6,9 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="$(dirname "$HERE")"
 TOOLS="$KIT/Tools"
+for required in SDK Mods; do
+  [ -d "$KIT/$required" ] || { echo "$(basename "$KIT")/$required is missing (Native/ needs SDK/ and Mods/ next to it)"; exit 1; }
+done
 
 NDK=""
 for c in "${1:-}" "$TOOLS/ndk" "${ANDROID_NDK_HOME:-}" "${ANDROID_NDK_ROOT:-}" "${ANDROID_NDK_LATEST_HOME:-}"; do

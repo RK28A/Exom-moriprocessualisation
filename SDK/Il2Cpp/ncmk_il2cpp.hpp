@@ -161,7 +161,7 @@ public:
 
 private:
     NCMKObject* obj_ = nullptr;
-    uint32_t handle_ = 0;
+    uintptr_t handle_ = 0;  // pointer-sized GC handle (never truncate)
 };
 
 /// Lazily resolved class: static ClassRef k{"UnityEngine.CoreModule", "UnityEngine", "Transform"}; k.Get().
@@ -212,6 +212,13 @@ public:
         if (!box) return nullptr;
         for (int i = 0; i < N; ++i) Host()->setField(box, fields_[i], const_cast<float*>(&values[i]));
         return Host()->unbox(box);
+    }
+
+    /// Reads scratch box `slot` back, after a method filled it through a `ref`/`out` parameter
+    /// (pass Arg(values, slot) as the argument, then ReadArg(slot, out)).
+    bool ReadArg(int slot, float* out) {
+        if (!Ready() || !scratch_[slot & 3]) return false;
+        return Read(scratch_[slot & 3], out);
     }
 
     /// Reads a boxed return value; false when null or unresolved.

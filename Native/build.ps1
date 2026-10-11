@@ -34,6 +34,14 @@ $isWin = ($env:OS -eq "Windows_NT")
 $exe = if ($isWin) { ".exe" } else { "" }
 $hint = "Open NightClubPatcher.exe and click 'Install / Repair Tools' (or run NightClubPatcher.Cli.exe --install-tools)."
 
+# Native\ builds only with SDK\ and Mods\ next to it (also in a Release folder).
+foreach ($required in "SDK", "Mods") {
+    if (-not (Test-Path (Join-Path $kit $required) -PathType Container)) {
+        $kitName = Split-Path -Leaf $kit
+        throw "$kitName\$required is missing, re-run Build-Windows.ps1 (it copies Native\, SDK\ and Mods\ next to NightClubPatcher.exe)."
+    }
+}
+
 function Get-SdkRoots {
     $roots = @()
     foreach ($v in @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT)) { if ($v) { $roots += $v } }

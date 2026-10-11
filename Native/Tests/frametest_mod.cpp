@@ -5,8 +5,10 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 
-#include "../../SDK/Core/ncmk_sdk.hpp"
+#include "../../SDK/Il2Cpp/ncmk_il2cpp.hpp"
+#include "../../SDK/Input/ncmk_input.hpp"
 
 static const NCMKModInfo kInfo = {sizeof(NCMKModInfo), "ncmk.test.frametest", "FrameTest", "NCMK", "1.0.0", NCMK_LOADER_API};
 
@@ -17,6 +19,7 @@ int (*g_originalRan)() = nullptr;
 int g_updates = 0, g_late = 0, g_fixed = 0, g_dupFrames = 0, g_notMain = 0, g_origNotFirst = 0, g_lateOutOfOrder = 0;
 int g_lastFrame = -1, g_lastUpdateFrame = -1;
 int g_posted = 0, g_postedOnMain = 0;
+std::string g_inputResult = "not checked";
 std::string g_scenes;
 std::string g_failures;
 
@@ -69,9 +72,17 @@ extern "C" NCMK_EXPORT int NCMKMod_Load(const NCMKHostApi* api) {
     Check(api->typeOf(input) != nullptr, "typeOf");
     NCMKObject* obj = api->newObject(input);
     Check(obj != nullptr, "newObject");
-    uint32_t pin = api->pin(obj);
+    uintptr_t pin = api->pin(obj);
     Check(pin != 0, "pin");
+    Check(pin > 0xffffffffull, "pin handle keeps 64 bits");  // the fake hands out handles above 4 GB
     api->unpin(pin);
+    {
+        NCMK::IL2CPP::Pinned held(obj);  // SDK wrapper: same pointer-sized handle, released by the destructor
+        NCMK::IL2CPP::Pinned moved(std::move(held));
+        Check(moved && !held, "Pinned move");
+    }
+    auto liveHandles = reinterpret_cast<int (*)()>(api->il2cppResolve("fake_live_gchandles"));
+    Check(liveHandles && liveHandles() == 0, "every GC handle released");
 
     Check(api->runOnMainThread(Posted, &g_postedFlag) == 1, "runOnMainThread accepted");
 
@@ -88,6 +99,22 @@ extern "C" NCMK_EXPORT void NCMKMod_OnUpdate(float dt) {
     if (!g_api->isMainThread()) ++g_notMain;
     if (g_originalRan && !g_originalRan()) ++g_origNotFirst;
     if (++g_updates == 1) NCMK_LOGI("[frametest] first OnUpdate (frame %d, dt %.4f)", frame, dt);
+
+    // NCMK::Input: the fake's OVRInput never reports a controller, so after ~90 frames the SDK
+    // must switch to the UnityEngine.XR fallback (right PrimaryButton held, right hand at x=0.25).
+    using namespace NCMK::Input;
+    ActiveSource();
+    if (g_updates == 120) {
+        auto ovrUpdates = reinterpret_cast<long (*)()>(g_api->il2cppResolve("fake_ovr_input_updates"));
+        Pose right = LocalPose(Hand::Right);
+        bool ok = ActiveSource() == Source::Xr && IsDown(Hand::Right, Button::Primary) && !IsDown(Hand::Left, Button::Primary) &&
+                  right.valid && right.position.x == 0.25f && right.position.y == 1.1f && LocalPose(Hand::Left).position.x == -0.25f &&
+                  ovrUpdates && ovrUpdates() >= 100;
+        g_inputResult = ok ? "PASS" : "FAIL";
+        NCMK_LOGI("[frametest] input: source=%d rightDown=%d pose=(%.2f, %.2f, %.2f) valid=%d ovrUpdates=%ld -> %s",
+                  static_cast<int>(ActiveSource()), IsDown(Hand::Right, Button::Primary), right.position.x, right.position.y,
+                  right.position.z, right.valid, ovrUpdates ? ovrUpdates() : -1, g_inputResult.c_str());
+    }
 }
 
 extern "C" NCMK_EXPORT void NCMKMod_OnLateUpdate(float) {
@@ -109,6 +136,6 @@ extern "C" NCMK_EXPORT void NCMKMod_Unload(void) {
               g_scenes.c_str());
     bool ok = g_updates >= 50 && g_late == g_updates && g_fixed > 0 && g_dupFrames == 0 && g_notMain == 0 &&
               g_origNotFirst == 0 && g_lateOutOfOrder == 0 && g_posted == 1 && g_postedOnMain == 1 &&
-              g_scenes == "MainMenu,Club";
+              g_scenes == "MainMenu,Club" && g_inputResult == "PASS";
     NCMK_LOGI("[frametest] RESULT %s", ok ? "PASS" : "FAIL");
 }

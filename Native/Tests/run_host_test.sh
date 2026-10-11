@@ -55,7 +55,7 @@ expect "$LOG" "Unity 6000.2.2f1, game version 1.1.0"
 expect "$LOG" "[NCMK] Class found"
 expect "$LOG" "STAGE 07 Plugin manager initialized"
 expect "$LOG" "[NCMK] Mod loaded: HelloWorld 1.0.0"
-expect "$LOG" "[NCMK] Mod loaded: DebugOverlay 0.2.0"
+expect "$LOG" "[NCMK] Mod loaded: DebugOverlay 0.3.0"
 expect "$LOG" "[NCMK] Mod loaded: LegacyTest 0.9.0 (ncs.legacytest by old, API 1, legacy NCSMod exports)"
 expect "$LOG" "legacy NCSMod_Update ticking on the background thread"
 expect "$LOG" "STAGE 08 Mods loaded"
@@ -69,6 +69,9 @@ expect "$LOG" "Scene loaded: MainMenu"
 expect "$LOG" "Scene loaded: Club"
 expect "$LOG" "---- NCMK Debug Overlay ----"
 expect "$LOG" "Device   : Meta Quest 3S"
+expect "$LOG" "Input: no OVRManager instance - NCMK calls OVRInput.Update() once per frame"
+expect "$LOG" "NCMK::Input source: UnityEngine.XR.InputDevices (OVRInput stayed silent for 90 frames)"
+expect "$LOG" "[frametest] input: source=2 rightDown=1 pose=(0.25, 1.10, 0.40) valid=1"
 expect "$LOG" "[frametest] RESULT PASS"
 expect "$LOG" "[host_game] before shutdown: original slots ExecuteTasks=1 EventSystem=0 OVRManager=1, OVRManager slot1=1"
 expect "$LOG" "Dispatcher stopped: MethodInfo pointers restored"
@@ -121,5 +124,66 @@ LOG3="$BUILD/host_game_wrongpkg.log"
 run "$LOG3" NCMK_HOST_PACKAGE=com.example.other HOST_GAME_SECONDS=1
 expect "$LOG3" "loader stays idle"
 reject "$LOG3" "STAGE 03"
+
+# 8) Drop-in mod: a mod is ONE folder in Mods/ (mod.json + .cpp). Built in a temporary copy of the
+#    kit, so no tracked file changes. Also: .disabled folders, folders without mod.json, stale
+#    output removal and duplicate output names.
+TRACKED_BEFORE="$(cd "$ROOT" && git status --porcelain 2>/dev/null || true)"
+KIT="$BUILD/dropin-kit"
+rm -rf "$KIT" && mkdir -p "$KIT"
+cp -r "$ROOT/SDK" "$ROOT/Mods" "$KIT/"
+mkdir -p "$KIT/Native" && (cd "$ROOT/Native" && tar --exclude='./build*' --exclude='./out' -cf - .) | (cd "$KIT/Native" && tar -xf -)
+mkdir -p "$KIT/Mods/Pulse/src" "$KIT/Mods/Off" "$KIT/Mods/NoJson"
+cat >"$KIT/Mods/Pulse/mod.json" <<'JSON'
+{ "id": "test.pulse", "name": "Pulse", "version": "1.0.0", "requiredApi": 2, "library": "libncmkmod_pulse.so" }
+JSON
+cat >"$KIT/Mods/Pulse/src/pulse.cpp" <<'CPP'
+#include "SDK/Core/ncmk_sdk.hpp"
+static const NCMKModInfo kInfo = {sizeof(NCMKModInfo), "test.pulse", "Pulse", "test", "1.0.0", NCMK_LOADER_API};
+extern "C" NCMK_EXPORT const NCMKModInfo* NCMKMod_GetInfo(void) { return &kInfo; }
+extern "C" NCMK_EXPORT int NCMKMod_Load(const NCMKHostApi* api) { return NCMK::Init(api, kInfo.id) ? 0 : 1; }
+extern "C" NCMK_EXPORT void NCMKMod_OnUpdate(float) {
+  static bool once = false;
+  if (!once) { once = true; NCMK_LOGI("[pulse] OnUpdate from a dropped-in folder"); }
+}
+CPP
+echo '{ "id": "test.off" }' >"$KIT/Mods/Off/mod.json"
+cp "$KIT/Mods/Pulse/src/pulse.cpp" "$KIT/Mods/Off/off.cpp"
+touch "$KIT/Mods/Off/.disabled"
+cp "$KIT/Mods/Pulse/src/pulse.cpp" "$KIT/Mods/NoJson/x.cpp"
+
+CONF="$BUILD/dropin-configure.log"
+cmake -S "$KIT/Native" -B "$KIT/build" -DNCMK_HOST_TEST=ON -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Debug}" >"$CONF" 2>&1
+cmake --build "$KIT/build" -j >/dev/null
+expect "$CONF" "NCMK mod  : Mods/Pulse -> libncmkmod_pulse.so (1 source file(s))"
+expect "$CONF" "NCMK mod  : Mods/HelloWorld -> libncmkmod_helloworld.so"
+expect "$CONF" "NCMK mod  : Mods/Off DISABLED (.disabled file) - not built"
+expect "$CONF" "NCMK mod  : Mods/NoJson ignored (no mod.json)"
+test -f "$KIT/build/out/libncmkmod_pulse.so" && echo "PASS  drop-in mod built" || { echo "FAIL  drop-in mod not built"; FAILED=1; }
+test ! -e "$KIT/build/out/libncmkmod_off.so" && echo "PASS  disabled mod not built" || { echo "FAIL  disabled mod built"; FAILED=1; }
+cp "$OUT/libmain.so" "$KIT/build/out/"
+LOG8="$BUILD/host_game_dropin.log"
+env NCMK_HOST_PACKAGE=com.mandegames.NightClubSimulater NCMK_MODS_ROOT="$KIT/NCMKMods" HOST_FRAME_TARGETS=ExecuteTasks \
+  HOST_GAME_SECONDS=2 LD_LIBRARY_PATH="$KIT/build/out" timeout 60 "$KIT/build/out/host_game" >"$LOG8" 2>&1 || true
+expect "$LOG8" "[NCMK] Mod loaded: Pulse 1.0.0"
+expect "$LOG8" "[pulse] OnUpdate from a dropped-in folder"
+
+# Removing the folder removes its output on the next configure (never embedded by accident).
+rm -rf "$KIT/Mods/Pulse"
+cmake "$KIT/build" >"$CONF" 2>&1
+expect "$CONF" "removed stale libncmkmod_pulse.so"
+test ! -e "$KIT/build/out/libncmkmod_pulse.so" && echo "PASS  stale drop-in output deleted" || { echo "FAIL  stale output kept"; FAILED=1; }
+
+# Two folders with the same output name: configure fails with a clear message.
+mkdir -p "$KIT/Mods/DupA" "$KIT/Mods/DupB"
+for d in DupA DupB; do
+  echo '{ "library": "libncmkmod_dup.so" }' >"$KIT/Mods/$d/mod.json"
+  echo 'int f() { return 0; }' >"$KIT/Mods/$d/m.cpp"
+done
+if cmake "$KIT/build" >"$CONF" 2>&1; then echo "FAIL  duplicate output names accepted"; FAILED=1; fi
+expect "$CONF" "Mods/DupA and Mods/DupB both build libncmkmod_dup.so"
+
+TRACKED_AFTER="$(cd "$ROOT" && git status --porcelain 2>/dev/null || true)"
+if [ "$TRACKED_BEFORE" = "$TRACKED_AFTER" ]; then echo "PASS  no repository file changed by the drop-in test"; else echo "FAIL  repository changed"; FAILED=1; fi
 
 exit $FAILED

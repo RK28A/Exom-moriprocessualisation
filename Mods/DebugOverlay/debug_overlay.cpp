@@ -14,7 +14,7 @@
 #include "../../SDK/Unity/ncmk_unity.hpp"
 
 static const NCMKModInfo kInfo = {
-    sizeof(NCMKModInfo), "ncmk.debugoverlay", "DebugOverlay", "RK", "0.2.0", NCMK_LOADER_API,
+    sizeof(NCMKModInfo), "ncmk.debugoverlay", "DebugOverlay", "RK", "0.3.0", NCMK_LOADER_API,
 };
 
 namespace {
@@ -51,7 +51,7 @@ std::string ModList() {
 
 std::string StatusText() {
     char buf[256];
-    snprintf(buf, sizeof(buf), "NCMK %s - %s\nScene: %s\nFPS: %.0f\nDevice: %s\nMods:", Host()->loaderVersion,
+    snprintf(buf, sizeof(buf), "Loader %s - game %s\nScene: %s\nFPS: %.0f\nDevice: %s\nMods:", Host()->loaderVersion,
              Game::GetVersion().c_str(), g_scene.c_str(), g_fps, Game::GetDeviceName().c_str());
     return buf + ModList();
 }
@@ -60,14 +60,36 @@ bool BuildPanel() {
     g_canvas = UI::Canvas::CreateWorldSpace("NCMK.DebugOverlay", {520, 360});
     if (!g_canvas) return false;
     g_canvas.SetSortingOrder(500);
-    UI::CreatePanel(g_canvas.rect, "Background", {0.05f, 0.03f, 0.10f, 0.78f});
-    UI::Element accent = UI::CreateElement(g_canvas.rect, "Accent");
-    if (accent) {
-        accent.rect.PlaceTopLeft({0, 0}, {520, 6});
-        UI::AddImage(accent.gameObject, {0.75f, 0.35f, 1.f, 1.f});
+    // Soft purple halo, then a rounded 9-sliced background (both decorative: no raycasts).
+    UI::Element glow = UI::CreateElement(g_canvas.rect, "Glow");
+    if (glow) {
+        glow.rect.Stretch(-24.f);
+        UI::Image img = UI::AddImage(glow.gameObject, {0.75f, 0.35f, 1.f, 0.35f});
+        img.SetSliced(UI::CreateGlowSprite(96, 18, 24));
+        img.SetRaycastTarget(false);
     }
-    g_text = UI::CreateText(g_canvas.rect, "Status", "NCMK", 26, {1, 1, 1, 1}, 18.f);
+    UI::Element bg = UI::CreateElement(g_canvas.rect, "Background");
+    if (bg) {
+        bg.rect.Stretch();
+        UI::Image img = UI::AddImage(bg.gameObject, {0.05f, 0.03f, 0.10f, 0.85f});
+        img.SetSliced(UI::CreateRoundedSprite(64, 18));
+        img.SetRaycastTarget(false);
+    }
+    UI::Element title = UI::CreateElement(g_canvas.rect, "Title");
+    if (title) {
+        title.rect.PlaceTopLeft({18, 12}, {484, 40});
+        UI::Text t = UI::AddText(title.gameObject, "NCMK Debug Overlay", 28, {0.85f, 0.6f, 1.f, 1.f});
+        t.SetBold(true);
+        t.SetRaycastTarget(false);
+    }
+    UI::Element body = UI::CreateElement(g_canvas.rect, "Status");
+    if (body) {
+        body.rect.PlaceTopLeft({18, 58}, {484, 290});
+        g_text = UI::AddText(body.gameObject, "NCMK", 24, {1, 1, 1, 1});
+    }
     if (!g_text) return false;
+    g_text.SetOverflow(true, true);
+    g_text.SetRaycastTarget(false);
     g_canvasObject = IL2CPP::Pinned(g_canvas.gameObject.Ptr());
     g_textObject = IL2CPP::Pinned(g_text.Ptr());
     return true;

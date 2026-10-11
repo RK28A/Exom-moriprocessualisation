@@ -115,7 +115,7 @@ void  NCMKMod_OnBackgroundTick(float deltaSeconds);       // optional, worker, ~
 | `findNestedClass(outer, name)` | `OVRInput` → `Button` |
 | `typeOf(klass)` | `System.Type` object (for `GetComponent(Type)`, `AddComponent(Type)`) |
 | `newObject(klass)` | `il2cpp_object_new`; **the constructor is not run** — invoke `.ctor` yourself |
-| `pin(obj)` / `unpin(handle)` | `il2cpp_gchandle_new(obj, pinned=true)`: keep an object alive across frames |
+| `pin(obj)` / `unpin(handle)` | `il2cpp_gchandle_new(obj, pinned=true)`: keep an object alive across frames. Handles are **`uintptr_t`**: Unity 6's il2cpp treats them as addresses (`il2cpp_gchandle_free` masks and dereferences them), so never store one in 32 bits |
 | `getEnumValue(enumClass, name, fallback)` | enum member by name, sign-extended from the enum's base type |
 
 Argument passing for `invoke`: reference types are passed as the object pointer itself, value types
@@ -134,9 +134,40 @@ handle / default value instead of crashing.
 | `Core/ncmk_sdk.hpp` | `NCMK` | `Init`, `Log`/`NCMK_LOGI`, `FailOnce`, `IsMainThread`, `RunOnMainThread`, `HasApi2`, `Game::*` (version, device, loaded mods, mods root) |
 | `Il2Cpp/ncmk_il2cpp.hpp` | `NCMK::IL2CPP` | `FindClass`, `FindMethod(k, name, argc)`, `FindMethod(k, name, {types...})`, `FindNestedClass`, `EnumValue`, `TypeOf`, `NewObject`, `Invoke`, `Call` (logs once), `Get/SetField`, `Unbox<T>`, `ToString`, `NewString`, `Export<Fn>`, `Pinned`, `ClassRef`, `StructCodec`, `NewByteArray` |
 | `Unity/ncmk_unity.hpp` | `NCMK::Unity` | `Vec2`, `Vec3`, `Vec4`, `Quat` (Euler, LookRotation, `*`), `Color`, `Rect`; `Object` (IsAlive, Name, Destroy, DontDestroyOnLoad), `GameObject` (Create, Find, Destroy, SetActive, AddComponent, GetComponent, transform), `Component`, `Transform` (position, rotation, localScale/scale, localPosition/localRotation, parent/SetParent, TransformPoint, forward), `Camera::Main`, `Time::Delta/Unscaled/Now/FrameCount`, `Scene::CurrentName`, `DontDestroyOnLoad` |
-| `Input/ncmk_input.hpp` | `NCMK::Input` | `IsDown`, `WasPressed`, `WasReleased` (`Button::Primary/Secondary/Thumbstick/Trigger/Grip/Menu`), `Trigger`, `Grip`, `Thumbstick`, `LocalPose`, `WorldPose` — on `OVRInput`, resolved by signature |
-| `UI/ncmk_ui.hpp` | `NCMK::UI` | `Canvas::CreateWorldSpace`, `RectTransform` (SetSize, SetAnchors, SetPivot, SetAnchoredPosition, Stretch, PlaceTopLeft), `CreateElement`, `CreatePanel`, `CreateText`, `Image`, `Text`, `AddRectMask2D`, `AddCanvasGroup`, `CreateTexture` (RGBA32), `CreateSolidTexture`, `CreateSprite`, `BuiltinFont` |
+| `Input/ncmk_input.hpp` | `NCMK::Input` | `IsDown`, `WasPressed`, `WasReleased` (`Button::Primary/Secondary/Thumbstick/Trigger/Grip/Menu`), `Trigger`, `Grip`, `Thumbstick`, `LocalPose`, `WorldPose`, `ActiveSource` — OVRInput, or `UnityEngine.XR.InputDevices` when OVRInput is missing or silent (see below) |
+| `UI/ncmk_ui.hpp` | `NCMK::UI` | `Canvas::CreateWorldSpace`, `RectTransform` (SetSize, SetAnchors, SetPivot, SetAnchoredPosition, Stretch, PlaceTopLeft), `CreateElement`, `CreatePanel`, `CreateText`, `Graphic` (SetColor, SetRaycastTarget), `Image` (SetSprite, **SetSliced**), `Text` (SetText, SetFontSize, SetAlignment, **SetBold**, **SetOverflow**), `AddRectMask2D`, `AddCanvasGroup`, `CreateTexture` (RGBA32), `CreateSolidTexture`, `CreateSprite` (optionally with a 9-slice border), **`CreateRoundedSprite(size, radius)`**, **`CreateGlowSprite(size, radius, softness)`**, `BuiltinFont` |
 | `Config/ncmk_config.hpp` | `NCMK` | `Config`: `<modsRoot>/Config/<modId>.cfg`, `key = value`, `GetBool/Int/Float/String` (record defaults), `Set`, `Save` (atomic) |
+
+### Controller input sources
+
+`OVRInput` only refreshes when `OVRInput.Update()` runs, normally from `OVRManager.Update()`. This
+game drives its hands with HurricaneVR, so an `OVRManager` is not guaranteed:
+
+1. Every frame, before the mods' callbacks, the loader checks `OVRManager.instance` (every 72
+   frames). When it is null and `OVRInput` exists, the loader calls `OVRInput.Update()` once per
+   frame (`[NCMK] Input: no OVRManager instance - NCMK calls OVRInput.Update() once per frame`).
+2. The SDK watches `OVRInput` during the first ~90 polled frames. If no controller is reported
+   connected and the poses never move, or `OVRInput` is missing, it switches to
+   `UnityEngine.XR.InputDevices` (`GetDeviceAtXRNode` + the static `TryGetFeatureValue*` calls,
+   resolved by signature): buttons, trigger, grip, thumbstick and pose.
+3. The choice is logged once per mod (`NCMK::Input source: ...`) and returned by
+   `NCMK::Input::ActiveSource()`. With the XR source, `WasPressed` / `WasReleased` are computed from
+   frame to frame, so poll them every frame.
+
+### UI building blocks
+
+```cpp
+static NCMKObject* rounded = UI::CreateRoundedSprite(64, 16);   // white, 9-sliced: tint with SetColor
+UI::Image bg = UI::AddImage(panel.gameObject, {0.05f, 0.03f, 0.1f, 0.85f});
+bg.SetSliced(rounded);            // corners stay 16 px whatever the panel size
+bg.SetRaycastTarget(false);       // decorative: pointer rays go through
+UI::Text title = UI::AddText(header.gameObject, "Title", 28, {1, 1, 1});
+title.SetBold(true);
+title.SetOverflow(/*wrap*/ true, /*truncate*/ true);
+```
+
+`CreateGlowSprite(size, radius, softness)` gives a halo (alpha fading over `softness` px) to put
+behind a panel. Create sprites once and keep them (`IL2CPP::Pinned`) instead of every frame.
 
 ### Value types without layout assumptions
 
@@ -277,18 +308,55 @@ extern "C" NCMK_EXPORT void NCMKMod_Unload(void) {
 }
 ```
 
-Build it like the samples: put the file in `Mods/ClickCounter/` and run **Build Native Loader**
-(or `Native/build.ps1`). Every `Mods/<Name>/` folder with `.cpp`/`.c` files is built automatically
-as `libncmkmod_<name>.so`; a missing or empty `Mods/` folder only skips the mods, the loader is
-always built.
+To build it: create `Mods/ClickCounter/`, put this file and a `mod.json` in it (see below), then
+rebuild. Nothing else to edit.
 
 ## Building and shipping
 
+### Adding a mod
+
+**Adding a mod = create `Mods/<Name>/` with `mod.json` and your `.cpp` files, then rebuild**
+(NightClubPatcher.exe → **Build Native Loader**, or `Native/build.ps1` / `Native/build.sh`).
+Removing a mod = delete its folder and rebuild. No other file of the kit is edited.
+
+```
+Mods/
+  Pulse/
+    mod.json          { "id": "me.pulse", "name": "Pulse", "author": "me", "version": "1.0.0",
+                        "requiredApi": 2, "library": "libncmkmod_pulse.so" }
+    pulse.cpp
+    ui/panel.cpp      sub-folders are fine: every *.cpp under Mods/Pulse/ is compiled
+  OldThing/
+    mod.json
+    .disabled         <- this file skips the folder (reported at configure time)
+```
+
+Rules (identical in the native build and in the app):
+
+| | |
+|---|---|
+| Discovery | every direct sub-folder of `Mods/` **that contains a `mod.json`** (others are reported and ignored) |
+| Sources | every `*.cpp` in the folder, recursively; adding a file re-runs the glob |
+| Output | the `"library"` of `mod.json` (`libncmkmod_pulse.so`), else `libncmkmod_<folder in lower case>.so` |
+| Includes | the kit root: `#include "SDK/UI/ncmk_ui.hpp"`, or relative paths |
+| Disable | a file named `.disabled` in the folder |
+| Duplicates | two folders producing the same library stop the build with a message naming both |
+| Removed mods | their old `libncmkmod_*.so` is deleted from `Native/out/arm64-v8a`, so it is never embedded by accident |
+
+The configure step prints one line per mod (`NCMK mod  : Mods/Pulse -> libncmkmod_pulse.so (2 source file(s))`),
+and the app shows the same list in its log. Before **PATCH GAME** / **PATCH + INSTALL** the app lists
+the mods that will be embedded and asks to continue. A Release folder needs `Native\`, `SDK\` and
+`Mods\` side by side; if one is missing, Build Native Loader stops with
+"Release\Mods is missing, re-run Build-Windows.ps1".
+
+### Toolchain and shipping
+
 * Mods are built with the same toolchain as the loader: NDK r27, `arm64-v8a`, `android-29`,
   `c++_static`, `-Wl,-z,max-page-size=16384`. NightClubPatcher.exe → **Build Native Loader**
-  builds `Native/` (loader + sample mods) into `Native/out/arm64-v8a/`.
-* **Embedded (recommended):** every `libncmkmod_*.so` next to the loader is embedded into
-  `lib/arm64-v8a/` of the patched APK (*Embed mods* option, on by default).
+  builds the loader and every mod folder into `Native/out/arm64-v8a/`.
+* **Embedded (recommended):** every `libncmkmod_*.so` in `Native/out/arm64-v8a` is embedded into
+  `lib/arm64-v8a/` of the patched APK — a newly built mod needs no setting (*Embed mods*, Advanced,
+  is on by default).
 * **External:** put the `.so` in the kit's `DeviceMods/Mods/` and click **Push mods + config**
   (Advanced) or run `NightClubPatcher.Cli.exe --push-mods`. Files go to the only folder both adb and
   the game can use — the game has **no storage permission**:
@@ -303,7 +371,8 @@ always built.
 
   Uninstalling the game deletes this folder (back it up with **Backup Game Data**).
 
-`mod.json` next to your sources documents the mod; the authoritative metadata is `NCMKModInfo`.
+`mod.json` is what makes a folder a mod for the build (and its `"library"` names the output); at
+run time the authoritative metadata is `NCMKModInfo` returned by `NCMKMod_GetInfo`.
 
 ## Compatibility
 

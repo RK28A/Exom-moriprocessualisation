@@ -1,4 +1,11 @@
-// NCMK SDK - Quest controller input, built on OVRInput (Oculus.VR assembly).
+// NCMK SDK - Quest controller input: OVRInput (Oculus.VR), with a UnityEngine.XR.InputDevices
+// fallback.
+//
+// OVRInput only refreshes when OVRInput.Update() runs. Games normally do that through OVRManager;
+// this one drives its hands with HurricaneVR, so the loader calls OVRInput.Update() once per frame
+// whenever OVRManager.instance is null. If OVRInput still shows no sign of life during the first
+// ~90 frames, or is missing, the SDK switches to UnityEngine.XR.InputDevices. The active source is
+// logged once ("NCMK::Input source: ...") and available as NCMK::Input::ActiveSource().
 //
 // Every OVRInput method is resolved by name AND parameter types (OVRInput has many overloads of
 // Get/GetDown/GetUp), and enum values (Button.One, Controller.RTouch...) by member name.
@@ -50,6 +57,7 @@ struct Ovr {
     NCMKMethod* get2D = nullptr;    // Vector2 Get(Axis2D, Controller)
     NCMKMethod* localPos = nullptr; // Vector3 GetLocalControllerPosition(Controller)
     NCMKMethod* localRot = nullptr; // Quaternion GetLocalControllerRotation(Controller)
+    NCMKMethod* isConnected = nullptr; // bool IsControllerConnected(Controller)
     int32_t ctrl[2] = {1, 2};       // LTouch, RTouch (re-read by name)
     bool ok = false;
 };
@@ -71,10 +79,10 @@ inline Ovr& O() {
         o.get2D = IL2CPP::FindMethod(o.input, "Get", {"OVRInput.Axis2D", "OVRInput.Controller"});
         o.localPos = IL2CPP::FindMethod(o.input, "GetLocalControllerPosition", {"OVRInput.Controller"});
         o.localRot = IL2CPP::FindMethod(o.input, "GetLocalControllerRotation", {"OVRInput.Controller"});
+        o.isConnected = IL2CPP::FindMethod(o.input, "IsControllerConnected", {"OVRInput.Controller"});
         o.ctrl[0] = static_cast<int32_t>(IL2CPP::EnumValue(o.controller, "LTouch", 1));
         o.ctrl[1] = static_cast<int32_t>(IL2CPP::EnumValue(o.controller, "RTouch", 2));
         o.ok = o.input && o.button && o.controller;
-        if (!o.ok) FailOnce("NCMK::Input", "NCMK::Input: OVRInput not found (Oculus.VR) - controller input disabled");
     }
     return o;
 }
@@ -115,6 +123,150 @@ inline float CallAxis1D(const char* name, int32_t& cache, bool& done, Hand h) {
     return IL2CPP::Unbox<float>(IL2CPP::Call("OVRInput.Get(Axis1D)", O().get1D, nullptr, args));
 }
 
+// ------------------------------------------------------------------ XR fallback (UnityEngine.XR)
+// UnityEngine.XR.InputDevices works with any XR provider (Oculus / OpenXR) whether or not the game
+// runs an OVRManager. Its static TryGetFeatureValue* methods take a device id and a usage name, so
+// everything is called statically and resolved by signature.
+struct Xr {
+    NCMKMethod* deviceAtNode = nullptr;  // InputDevice GetDeviceAtXRNode(XRNode)
+    NCMKField* deviceId = nullptr;       // InputDevice.m_DeviceId (UInt64)
+    NCMKMethod* tryBool = nullptr;       // bool TryGetFeatureValue(UInt64, String, ref bool)
+    NCMKMethod* tryFloat = nullptr;      // bool TryGetFeatureValue_float(UInt64, String, ref float)
+    NCMKMethod* tryVec2 = nullptr;       // bool TryGetFeatureValue_Vector2f(UInt64, String, ref Vector2)
+    NCMKMethod* tryVec3 = nullptr;       // bool TryGetFeatureValue_Vector3f(UInt64, String, ref Vector3)
+    NCMKMethod* tryQuat = nullptr;       // bool TryGetFeatureValue_Quaternionf(UInt64, String, ref Quaternion)
+    int32_t node[2] = {4, 5};            // XRNode.LeftHand / RightHand (re-read by name)
+    bool ok = false;
+};
+
+inline Xr& X() {
+    static Xr x;
+    static bool resolved = false;
+    if (!resolved && IL2CPP::IsReady()) {
+        resolved = true;
+        NCMKClass* devices = IL2CPP::FindClass("UnityEngine.XRModule", "UnityEngine.XR", "InputDevices");
+        NCMKClass* device = IL2CPP::FindClass("UnityEngine.XRModule", "UnityEngine.XR", "InputDevice");
+        NCMKClass* node = IL2CPP::FindClass("UnityEngine.XRModule", "UnityEngine.XR", "XRNode");
+        x.deviceAtNode = IL2CPP::FindMethod(devices, "GetDeviceAtXRNode", {"UnityEngine.XR.XRNode"});
+        x.deviceId = IL2CPP::FindField(device, "m_DeviceId");
+        x.tryBool = IL2CPP::FindMethod(devices, "TryGetFeatureValue", {"System.UInt64", "System.String", "System.Boolean&"});
+        x.tryFloat = IL2CPP::FindMethod(devices, "TryGetFeatureValue_float", {"System.UInt64", "System.String", "System.Single&"});
+        x.tryVec2 = IL2CPP::FindMethod(devices, "TryGetFeatureValue_Vector2f", {"System.UInt64", "System.String", "UnityEngine.Vector2&"});
+        x.tryVec3 = IL2CPP::FindMethod(devices, "TryGetFeatureValue_Vector3f", {"System.UInt64", "System.String", "UnityEngine.Vector3&"});
+        x.tryQuat = IL2CPP::FindMethod(devices, "TryGetFeatureValue_Quaternionf",
+                                       {"System.UInt64", "System.String", "UnityEngine.Quaternion&"});
+        x.node[0] = static_cast<int32_t>(IL2CPP::EnumValue(node, "LeftHand", 4));
+        x.node[1] = static_cast<int32_t>(IL2CPP::EnumValue(node, "RightHand", 5));
+        x.ok = x.deviceAtNode && x.deviceId && x.tryBool;
+    }
+    return x;
+}
+
+inline uint64_t XrDevice(Hand h) {
+    auto& x = X();
+    int32_t node = x.node[h == Hand::Left ? 0 : 1];
+    void* args[] = {&node};
+    NCMKObject* dev = IL2CPP::Call("InputDevices.GetDeviceAtXRNode", x.deviceAtNode, nullptr, args);
+    return dev ? IL2CPP::GetField<uint64_t>(dev, x.deviceId) : 0;
+}
+
+inline bool XrBool(Hand h, const char* usage) {
+    uint64_t id = XrDevice(h);
+    bool value = false;
+    void* args[] = {&id, IL2CPP::NewString(usage), &value};
+    bool found = IL2CPP::Unbox<bool>(IL2CPP::Call("InputDevices.TryGetFeatureValue(bool)", X().tryBool, nullptr, args));
+    return found && value;
+}
+
+inline float XrFloat(Hand h, const char* usage) {
+    uint64_t id = XrDevice(h);
+    float value = 0.f;
+    void* args[] = {&id, IL2CPP::NewString(usage), &value};
+    bool found = IL2CPP::Unbox<bool>(IL2CPP::Call("InputDevices.TryGetFeatureValue_float", X().tryFloat, nullptr, args));
+    return found ? value : 0.f;
+}
+
+/// ref Vector2/Vector3/Quaternion: the SDK scratch box receives the value, read back by field name.
+template <typename T>
+inline bool XrStruct(Hand h, const char* what, NCMKMethod* m, const char* usage, T& out) {
+    auto& codec = Unity::detail::CodecFor<T>::Get();
+    T zero = out;
+    void* ref = codec.Arg(reinterpret_cast<const float*>(&zero), 3);
+    if (!ref || !m) return false;
+    uint64_t id = XrDevice(h);
+    void* args[] = {&id, IL2CPP::NewString(usage), ref};
+    if (!IL2CPP::Unbox<bool>(IL2CPP::Call(what, m, nullptr, args))) return false;
+    return codec.ReadArg(3, reinterpret_cast<float*>(&out));
+}
+
+/// Pressed / released edges for the XR source (InputDevices has no "down this frame").
+/// Poll every frame for reliable edges.
+struct Edge {
+    int frame = -1;
+    bool cur = false, prev = false;
+};
+
+inline const char* XrUsage(Button b) {
+    static const char* names[] = {"PrimaryButton", "SecondaryButton", "Primary2DAxisClick", "TriggerButton", "GripButton", "MenuButton"};
+    return names[static_cast<int>(b)];
+}
+
+inline Edge& XrEdge(Hand h, Button b) {
+    static Edge edges[2][6];
+    Edge& e = edges[h == Hand::Left ? 0 : 1][static_cast<int>(b)];
+    int frame = Unity::Time::FrameCount();
+    if (frame != e.frame || frame < 0) {
+        e.prev = e.cur;
+        e.cur = XrBool(h, XrUsage(b));
+        e.frame = frame;
+    }
+    return e;
+}
+
+// ------------------------------------------------------------------ source selection
+enum class Source { Undecided, OvrInput, Xr, None };
+
+/// OVRInput is used while it shows signs of life (a controller reported connected, or a pose that
+/// moves) during the first ~90 polled frames. If it stays silent (no OVRManager and no pump, or a
+/// rig that bypasses OVR) the XR InputDevices fallback takes over. Logged once.
+inline Source ActiveSource() {
+    static Source source = Source::Undecided;
+    static int frames = 0, lastFrame = -1;
+    static Vec3 firstPos[2];
+    static bool alive = false;
+    if (source != Source::Undecided) return source;
+
+    auto& o = O();
+    auto decide = [](Source s, const char* why) {
+        source = s;
+        const char* name = s == Source::OvrInput ? "OVRInput" : s == Source::Xr ? "UnityEngine.XR.InputDevices" : "none";
+        Log(s == Source::None ? NCMK_LOG_WARN : NCMK_LOG_INFO, "NCMK::Input source: %s (%s)", name, why);
+        return source;
+    };
+    if (!o.ok) return X().ok ? decide(Source::Xr, "OVRInput not found") : decide(Source::None, "neither OVRInput nor XR InputDevices found");
+
+    int frame = Unity::Time::FrameCount();
+    if (frame != lastFrame) {
+        lastFrame = frame;
+        for (int i = 0; i < 2 && !alive; ++i) {
+            int32_t controller = o.ctrl[i];
+            void* args[] = {&controller};
+            if (o.isConnected && IL2CPP::Unbox<bool>(IL2CPP::Invoke(o.isConnected, nullptr, args))) alive = true;
+            Vec3 p = Unity::detail::Read<Vec3>(IL2CPP::Invoke(o.localPos, nullptr, args));
+            if (frames == 0) firstPos[i] = p;
+            else if (p.x != firstPos[i].x || p.y != firstPos[i].y || p.z != firstPos[i].z) alive = true;
+        }
+        ++frames;
+    }
+    if (alive) return decide(Source::OvrInput, "controller state is updating");
+    if (frames >= 90)
+        return X().ok ? decide(Source::Xr, "OVRInput stayed silent for 90 frames")
+                      : decide(Source::OvrInput, "OVRInput silent but no XR InputDevices to fall back to");
+    return Source::OvrInput;  // still observing
+}
+
+inline bool UseXr() { return ActiveSource() == Source::Xr; }
+
 inline Unity::Transform FindTrackingSpace() {
     static IL2CPP::ClassRef rigClass{"Oculus.VR", "", "OVRCameraRig"};
     NCMKClass* rig = rigClass.Get();
@@ -146,25 +298,39 @@ inline Unity::Transform TrackingSpace() {
 }
 }  // namespace detail
 
+/// Which backend answers: OVRInput or the UnityEngine.XR fallback (decided on the first frames).
+using detail::Source;
+inline Source ActiveSource() { return detail::ActiveSource(); }
+
 /// True while the button is held.
 inline bool IsDown(Hand h, Button b) {
     NCMK_REQUIRE_MAIN_THREAD(false);
+    if (detail::UseXr()) return detail::XrEdge(h, b).cur;
     return detail::CallButton("OVRInput.Get(Button)", detail::O().get, h, b);
 }
 /// True on the frame the button was pressed.
 inline bool WasPressed(Hand h, Button b) {
     NCMK_REQUIRE_MAIN_THREAD(false);
+    if (detail::UseXr()) {
+        auto& e = detail::XrEdge(h, b);
+        return e.cur && !e.prev;
+    }
     return detail::CallButton("OVRInput.GetDown(Button)", detail::O().getDown, h, b);
 }
 /// True on the frame the button was released.
 inline bool WasReleased(Hand h, Button b) {
     NCMK_REQUIRE_MAIN_THREAD(false);
+    if (detail::UseXr()) {
+        auto& e = detail::XrEdge(h, b);
+        return !e.cur && e.prev;
+    }
     return detail::CallButton("OVRInput.GetUp(Button)", detail::O().getUp, h, b);
 }
 
 /// Index trigger, 0..1.
 inline float Trigger(Hand h) {
     NCMK_REQUIRE_MAIN_THREAD(0.f);
+    if (detail::UseXr()) return detail::XrFloat(h, "Trigger");
     static int32_t v;
     static bool done;
     return detail::CallAxis1D("PrimaryIndexTrigger", v, done, h);
@@ -172,6 +338,7 @@ inline float Trigger(Hand h) {
 /// Hand (grip) trigger, 0..1.
 inline float Grip(Hand h) {
     NCMK_REQUIRE_MAIN_THREAD(0.f);
+    if (detail::UseXr()) return detail::XrFloat(h, "Grip");
     static int32_t v;
     static bool done;
     return detail::CallAxis1D("PrimaryHandTrigger", v, done, h);
@@ -179,6 +346,11 @@ inline float Grip(Hand h) {
 /// Thumbstick, -1..1 on both axes.
 inline Vec2 Thumbstick(Hand h) {
     NCMK_REQUIRE_MAIN_THREAD(Vec2{});
+    if (detail::UseXr()) {
+        Vec2 v;
+        detail::XrStruct(h, "InputDevices.TryGetFeatureValue_Vector2f", detail::X().tryVec2, "Primary2DAxis", v);
+        return v;
+    }
     auto& o = detail::O();
     if (!o.ok) return {};
     static int32_t axisCache;
@@ -188,9 +360,17 @@ inline Vec2 Thumbstick(Hand h) {
     return Unity::detail::Read<Vec2>(IL2CPP::Call("OVRInput.Get(Axis2D)", o.get2D, nullptr, args));
 }
 
-/// Controller pose in tracking space (OVRInput.GetLocalController*).
+/// Controller pose in tracking space (OVRInput.GetLocalController*, or XR DevicePosition/Rotation).
 inline Pose LocalPose(Hand h) {
     NCMK_REQUIRE_MAIN_THREAD(Pose{});
+    if (detail::UseXr()) {
+        Pose p;
+        p.rotation = Quat::Identity();
+        bool okPos = detail::XrStruct(h, "InputDevices.TryGetFeatureValue_Vector3f", detail::X().tryVec3, "DevicePosition", p.position);
+        bool okRot = detail::XrStruct(h, "InputDevices.TryGetFeatureValue_Quaternionf", detail::X().tryQuat, "DeviceRotation", p.rotation);
+        p.valid = okPos && okRot;
+        return p;
+    }
     auto& o = detail::O();
     if (!o.ok) return {};
     int32_t controller = detail::Ctrl(h);

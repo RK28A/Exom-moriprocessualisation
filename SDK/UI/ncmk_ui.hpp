@@ -10,6 +10,7 @@
 // Everything is resolved by name; a missing class logs once and the helper returns an empty handle.
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -179,33 +180,51 @@ struct Canvas {
 
 // ============================================================================ components
 
-class Image : public Component {
+/// UnityEngine.UI.Graphic: shared by Image and Text.
+class Graphic : public Component {
 public:
     using Component::Component;
     void SetColor(Color c) const {
         NCMK_REQUIRE_MAIN_THREAD();
         detail::SetColor(ptr_, c);
     }
+    /// false = clicks / pointer rays go through it (decorative elements).
+    void SetRaycastTarget(bool v) const {
+        NCMK_REQUIRE_MAIN_THREAD();
+        detail::SetBool("Graphic.set_raycastTarget",
+                        NCMK_METHOD_SIG(detail::GraphicClass().Get(), "set_raycastTarget", "System.Boolean"), ptr_, v);
+    }
+};
+
+class Image : public Graphic {
+public:
+    using Graphic::Graphic;
     void SetSprite(NCMKObject* sprite) const {
         NCMK_REQUIRE_MAIN_THREAD();
         void* args[] = {sprite};
         IL2CPP::Call("Image.set_sprite", NCMK_METHOD_SIG(detail::ImageClass().Get(), "set_sprite", "UnityEngine.Sprite"), ptr_, args);
     }
+    /// 9-slice: the sprite's border (CreateSprite with a border, CreateRoundedSprite...) keeps its
+    /// corners unscaled while the element is resized.
+    void SetSliced(NCMKObject* sprite, bool fillCenter = true) const {
+        NCMK_REQUIRE_MAIN_THREAD();
+        SetSprite(sprite);
+        NCMKClass* image = detail::ImageClass().Get();
+        int32_t sliced = static_cast<int32_t>(IL2CPP::EnumValue(IL2CPP::FindNestedClass(image, "Type"), "Sliced", 1));
+        detail::SetInt("Image.set_type", NCMK_METHOD_SIG(image, "set_type", "UnityEngine.UI.Image.Type"), ptr_, sliced);
+        detail::SetBool("Image.set_fillCenter", NCMK_METHOD_SIG(image, "set_fillCenter", "System.Boolean"), ptr_, fillCenter);
+    }
 };
 
 enum class Anchor { UpperLeft, UpperCenter, UpperRight, MiddleLeft, MiddleCenter, MiddleRight, LowerLeft, LowerCenter, LowerRight };
 
-class Text : public Component {
+class Text : public Graphic {
 public:
-    using Component::Component;
+    using Graphic::Graphic;
     void SetText(const char* utf8) const {
         NCMK_REQUIRE_MAIN_THREAD();
         void* args[] = {IL2CPP::NewString(utf8)};
         IL2CPP::Call("Text.set_text", NCMK_METHOD_SIG(detail::TextClass().Get(), "set_text", "System.String"), ptr_, args);
-    }
-    void SetColor(Color c) const {
-        NCMK_REQUIRE_MAIN_THREAD();
-        detail::SetColor(ptr_, c);
     }
     void SetFontSize(int size) const {
         NCMK_REQUIRE_MAIN_THREAD();
@@ -223,6 +242,27 @@ public:
         int32_t v = static_cast<int32_t>(IL2CPP::EnumValue(detail::TextAnchorEnum().Get(), names[static_cast<int>(a)], 0));
         detail::SetInt("Text.set_alignment", NCMK_METHOD_SIG(detail::TextClass().Get(), "set_alignment", "UnityEngine.TextAnchor"),
                        ptr_, v);
+    }
+    /// FontStyle.Bold / FontStyle.Normal.
+    void SetBold(bool bold) const {
+        NCMK_REQUIRE_MAIN_THREAD();
+        static IL2CPP::ClassRef style{"UnityEngine.TextRenderingModule", "UnityEngine", "FontStyle"};
+        int32_t v = static_cast<int32_t>(IL2CPP::EnumValue(style.Get(), bold ? "Bold" : "Normal", bold ? 1 : 0));
+        detail::SetInt("Text.set_fontStyle", NCMK_METHOD_SIG(detail::TextClass().Get(), "set_fontStyle", "UnityEngine.FontStyle"),
+                       ptr_, v);
+    }
+    /// wrap: wrap long lines (else they overflow horizontally); truncate: cut text that does not fit
+    /// vertically (else it overflows below the rect).
+    void SetOverflow(bool wrap, bool truncate) const {
+        NCMK_REQUIRE_MAIN_THREAD();
+        static IL2CPP::ClassRef hMode{"UnityEngine.TextRenderingModule", "UnityEngine", "HorizontalWrapMode"};
+        static IL2CPP::ClassRef vMode{"UnityEngine.TextRenderingModule", "UnityEngine", "VerticalWrapMode"};
+        int32_t h = static_cast<int32_t>(IL2CPP::EnumValue(hMode.Get(), wrap ? "Wrap" : "Overflow", wrap ? 0 : 1));
+        int32_t v = static_cast<int32_t>(IL2CPP::EnumValue(vMode.Get(), truncate ? "Truncate" : "Overflow", truncate ? 0 : 1));
+        detail::SetInt("Text.set_horizontalOverflow",
+                       NCMK_METHOD_SIG(detail::TextClass().Get(), "set_horizontalOverflow", "UnityEngine.HorizontalWrapMode"), ptr_, h);
+        detail::SetInt("Text.set_verticalOverflow",
+                       NCMK_METHOD_SIG(detail::TextClass().Get(), "set_verticalOverflow", "UnityEngine.VerticalWrapMode"), ptr_, v);
     }
 };
 
@@ -392,6 +432,78 @@ inline NCMKObject* CreateSprite(NCMKObject* texture2D, int width, int height, Ve
                         NCMK_METHOD_SIG(detail::SpriteClass().Get(), "Create", "UnityEngine.Texture2D", "UnityEngine.Rect",
                                         "UnityEngine.Vector2", "System.Single"),
                         nullptr, args);
+}
+
+/// Sprite.Create with a 9-slice border (left, bottom, right, top in pixels) for Image::SetSliced.
+inline NCMKObject* CreateSprite(NCMKObject* texture2D, int width, int height, Unity::Vec4 border, Vec2 pivot = {0.5f, 0.5f},
+                                float pixelsPerUnit = 100.f) {
+    NCMK_REQUIRE_MAIN_THREAD(nullptr);
+    if (!texture2D) return nullptr;
+    static IL2CPP::ClassRef meshType{"UnityEngine.CoreModule", "UnityEngine", "SpriteMeshType"};
+    Unity::Rect r{0, 0, static_cast<float>(width), static_cast<float>(height)};
+    uint32_t extrude = 0;
+    int32_t fullRect = static_cast<int32_t>(IL2CPP::EnumValue(meshType.Get(), "FullRect", 0));
+    void* args[] = {texture2D, Unity::detail::Arg(r), Unity::detail::Arg(pivot), &pixelsPerUnit, &extrude, &fullRect,
+                    Unity::detail::Arg(border)};
+    if (!args[1] || !args[2] || !args[6]) return nullptr;
+    return IL2CPP::Call("Sprite.Create(border)",
+                        NCMK_METHOD_SIG(detail::SpriteClass().Get(), "Create", "UnityEngine.Texture2D", "UnityEngine.Rect",
+                                        "UnityEngine.Vector2", "System.Single", "System.UInt32", "UnityEngine.SpriteMeshType",
+                                        "UnityEngine.Vector4"),
+                        nullptr, args);
+}
+
+namespace detail {
+/// Signed distance from pixel (x, y) to a rounded square of `size` px inset by `inset`, corner `radius`.
+inline float RoundedRectDistance(float x, float y, float size, float inset, float radius) {
+    float half = size * 0.5f - inset;
+    float px = std::fabs(x - size * 0.5f) - (half - radius);
+    float py = std::fabs(y - size * 0.5f) - (half - radius);
+    float ox = px > 0 ? px : 0, oy = py > 0 ? py : 0;
+    float inside = px > py ? px : py;
+    return std::sqrt(ox * ox + oy * oy) + (inside < 0 ? inside : 0) - radius;
+}
+
+inline NCMKObject* SpriteFromAlpha(int size, float border, float (*alphaAt)(float d, float param), float param, float inset,
+                                   float radius) {
+    std::vector<uint8_t> px(static_cast<size_t>(size) * size * 4);
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x) {
+            float d = RoundedRectDistance(x + 0.5f, y + 0.5f, static_cast<float>(size), inset, radius);
+            float a = alphaAt(d, param);
+            uint8_t* p = &px[(static_cast<size_t>(y) * size + x) * 4];
+            p[0] = p[1] = p[2] = 255;  // white: tint with Image::SetColor
+            p[3] = static_cast<uint8_t>(a <= 0 ? 0 : a >= 1 ? 255 : a * 255.f + 0.5f);
+        }
+    NCMKObject* tex = CreateTexture(size, size, px.data());
+    return CreateSprite(tex, size, size, Unity::Vec4{border, border, border, border});
+}
+}  // namespace detail
+
+/// White rounded square, 9-sliced (border = radius): Image::SetSliced(CreateRoundedSprite(64, 16))
+/// then SetColor for a panel / button of any size with constant corners. Cache the result.
+inline NCMKObject* CreateRoundedSprite(int size, float radius) {
+    NCMK_REQUIRE_MAIN_THREAD(nullptr);
+    if (size < 4) size = 4;
+    if (radius > size * 0.5f - 1) radius = size * 0.5f - 1;
+    return detail::SpriteFromAlpha(
+        size, radius, [](float d, float) { return 0.5f - d; }, 0.f, 0.f, radius);  // 1 px anti-aliased edge
+}
+
+/// Soft glow: a rounded square whose alpha fades out over `softness` px outside its edge. Put it
+/// behind a panel (slightly larger) for a halo. 9-sliced with border = radius + softness.
+inline NCMKObject* CreateGlowSprite(int size, float radius, float softness) {
+    NCMK_REQUIRE_MAIN_THREAD(nullptr);
+    if (softness < 1) softness = 1;
+    if (size < static_cast<int>(2 * (radius + softness)) + 4) size = static_cast<int>(2 * (radius + softness)) + 4;
+    return detail::SpriteFromAlpha(
+        size, radius + softness,
+        [](float d, float soft) {
+            if (d <= 0) return 1.f;
+            float t = 1.f - d / soft;
+            return t <= 0 ? 0.f : t * t;  // quadratic falloff
+        },
+        softness, softness, radius);
 }
 
 }  // namespace UI
