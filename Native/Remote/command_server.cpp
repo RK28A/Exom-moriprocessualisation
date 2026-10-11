@@ -5,6 +5,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -52,9 +53,14 @@ bool ReadLine(int fd, std::string& out, int timeoutMs) {
         int left = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count());
         if (left <= 0) return false;
         pollfd p{fd, POLLIN, 0};
-        if (poll(&p, 1, left) <= 0) return false;
+        int pr = poll(&p, 1, left);
+        // Once attached to IL2CPP, this thread receives the GC's suspend/resume signals: poll() then
+        // fails with EINTR even with SA_RESTART. Retry; the deadline is recomputed above.
+        if (pr < 0 && errno == EINTR) continue;
+        if (pr <= 0) return false;
         char c;
         ssize_t r = recv(fd, &c, 1, 0);
+        if (r < 0 && errno == EINTR) continue;
         if (r <= 0) return false;
         if (c == '\n') return true;
         if (c != '\r') out += c;
@@ -123,6 +129,9 @@ void* ServerMain(void*) {
         if (pr <= 0) continue;
         int fd = accept4(lfd, nullptr, nullptr, SOCK_CLOEXEC);
         if (fd < 0) continue;
+        // A PC that stops reading must not block the (single) server thread forever.
+        timeval tv{60, 0};
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
         HandleClient(fd);
         close(fd);
     }

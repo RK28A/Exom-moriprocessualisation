@@ -12,6 +12,7 @@
 #include <cstring>
 #include <vector>
 
+#include "../Hooks/main_thread.h"
 #include "../Il2Cpp/il2cpp_api.h"
 #include "../Logging/ncmk_log.h"
 #include "il2cpp_inspect.h"
@@ -121,6 +122,33 @@ std::string ClassModifiers(Il2CppClass* k, int flags, bool isInterface, bool isE
 
 bool IsIntegral(int kind) { return kind >= 0x02 && kind <= 0x0b; }  // bool .. u8
 
+// Element type of a constant: enums (any enum type, not only the declaring one) use their underlying type.
+int ConstKind(const Il2CppType* t) {
+    if (!t || !api.il2cpp_type_get_type) return 0;
+    int kind = api.il2cpp_type_get_type(t);
+    if (kind == 0x11 && api.il2cpp_class_from_type) {
+        Il2CppClass* c = api.il2cpp_class_from_type(t);
+        if (c && api.il2cpp_class_is_enum && api.il2cpp_class_is_enum(c)) {
+            const Il2CppType* base = api.il2cpp_class_enum_basetype ? api.il2cpp_class_enum_basetype(c) : nullptr;
+            kind = base ? api.il2cpp_type_get_type(base) : 0x08;
+        }
+    }
+    return kind;
+}
+
+// il2cpp copies a literal using the size of its type: sign- or zero-extend from that width.
+int64_t Widen(int64_t raw, int kind) {
+    switch (kind) {
+        case 0x04: return static_cast<int8_t>(raw);
+        case 0x05: return static_cast<uint8_t>(raw);
+        case 0x06: return static_cast<int16_t>(raw);
+        case 0x03: case 0x07: return static_cast<uint16_t>(raw);
+        case 0x08: return static_cast<int32_t>(raw);
+        case 0x09: return static_cast<uint32_t>(raw);
+        default: return raw;
+    }
+}
+
 // ---------------------------------------------------------------- buffered writer
 
 class Writer {
@@ -206,18 +234,23 @@ void DumpClass(Writer& w, Il2CppClass* k, Result& r) {
             w.Put(" ");
             w.Put(api.il2cpp_field_get_name(f));
             if (isConst) {
-                // Integral constants (enum members included): read the literal; other constants are skipped.
-                int kind = t && api.il2cpp_type_get_type ? api.il2cpp_type_get_type(t) : 0;
-                bool enumMember = isEnum && t && api.il2cpp_class_from_type && api.il2cpp_class_from_type(t) == k;
-                if ((IsIntegral(kind) || enumMember) && api.il2cpp_field_static_get_value) {
-                    int64_t v = 0;
-                    api.il2cpp_field_static_get_value(f, &v);
-                    if (kind == 0x02) w.Put(v & 0xff ? " = true" : " = false");
-                    else w.Printf(" = %" PRId64, enumMember || kind == 0x08 ? static_cast<int64_t>(static_cast<int32_t>(v)) : v);
+                // Integral constants (enum members included, any underlying type): read the literal at its
+                // real width; other constants (strings, floats) are skipped.
+                int kind = ConstKind(t);
+                if (IsIntegral(kind) && api.il2cpp_field_static_get_value) {
+                    int64_t raw = 0;
+                    api.il2cpp_field_static_get_value(f, &raw);
+                    if (kind == 0x02) w.Put(raw & 0xff ? " = true" : " = false");
+                    else if (kind == 0x0b) w.Printf(" = %" PRIu64, static_cast<uint64_t>(raw));
+                    else w.Printf(" = %" PRId64, Widen(raw, kind));
                 }
                 w.Put(";\n");
             } else if (api.il2cpp_field_get_offset) {
-                w.Printf("; // 0x%zx\n", api.il2cpp_field_get_offset(f));
+                // IL2CPP reports value-type instance field offsets inside the boxed object (after the
+                // object header); Il2CppDumper prints them inside the unboxed value.
+                size_t off = api.il2cpp_field_get_offset(f);
+                if (isValueType && !isStatic && off >= 2 * sizeof(void*)) off -= 2 * sizeof(void*);
+                w.Printf("; // 0x%zx\n", off);
             } else {
                 w.Put(";\n");
             }
@@ -258,13 +291,24 @@ void DumpClass(Writer& w, Il2CppClass* k, Result& r) {
             if (!header) { w.Put("\n\t// Methods\n"); header = true; }
             uint32_t mf = api.il2cpp_method_get_flags ? api.il2cpp_method_get_flags(m, nullptr) : 0;
             void* ptr = *reinterpret_cast<void* const*>(m);  // methodPointer: documented MethodInfo slot 0
+            // Methods NCMK itself swapped (dispatcher target, diagnostics probes): show the game's code.
+            if (void* orig = ncmk::hooks::OriginalFor(ptr)) ptr = orig;
+            else if (void* porig = diag::ProbeOriginalFor(ptr)) ptr = porig;
             w.Put("\n\t");
             w.Put(Address(ptr));
             w.Put("\n\t");
             w.Put(Access(mf));
             if (mf & 0x10) w.Put("static ");
-            if (mf & 0x400) w.Put("abstract ");
-            else if ((mf & 0x40) && !(mf & 0x10)) w.Put(mf & 0x100 ? "virtual " : (mf & 0x20 ? "sealed override " : "override "));
+            // Il2CppDumper order: ABSTRACT, FINAL, VIRTUAL; NEW_SLOT (0x100) clear = reuses the slot = override.
+            const bool reuseSlot = (mf & 0x100) == 0;
+            if (mf & 0x400) {
+                w.Put("abstract ");
+                if (reuseSlot) w.Put("override ");
+            } else if (mf & 0x20) {
+                if (reuseSlot) w.Put("sealed override ");  // final|newslot: interface implementation, no modifier
+            } else if (mf & 0x40) {
+                w.Put(reuseSlot ? "override " : "virtual ");
+            }
             w.Put(api.il2cpp_method_get_return_type ? TypeName(api.il2cpp_method_get_return_type(m)).c_str() : "?");
             w.Put(" ");
             w.Put(api.il2cpp_method_get_name(m));
@@ -305,7 +349,7 @@ Result DumpAll(Sink& sink, const Header& h, Pacing pacing) {
              h.unityVersion.c_str(), h.loaderVersion.c_str());
     w.Printf("// libil2cpp.so: %s, loaded at 0x%" PRIxPTR "\n", mod.path.empty() ? "?" : mod.path.c_str(), mod.base);
     w.Put("// RVA = address - load base; Offset = position in libil2cpp.so; VA = address in this process.\n");
-    w.Put("// Field comments are instance offsets (static fields: offset in the class static data).\n");
+    w.Put("// Field comments are instance offsets (structs/enums: inside the unboxed value; static fields: in the class static data).\n");
     w.Printf("// %zu assemblies, %zu classes\n", assemblies.size(), total);
     for (size_t i = 0; i < assemblies.size(); ++i)
         w.Printf("// Image %zu: %s.dll - %zu classes\n", i, assemblies[i].c_str(), IL::ClassCount(IL::FindAssembly(assemblies[i].c_str())));

@@ -56,6 +56,9 @@ using ProbeCallback = void (*)(int probeId, Il2CppObject* self, bool before, boo
 /// Returns the probe id, or -1 (not installed, reason logged).
 int InstallProbe(const char* tag, const MethodInfo* method, ProbeCallback callback);
 
+/// The game's original method pointer when `entry` is a probe entry point, else null.
+void* ProbeOriginalFor(const void* entry);
+
 /// Tag given to InstallProbe (for log lines in callbacks).
 const char* ProbeTag(int probeId);
 

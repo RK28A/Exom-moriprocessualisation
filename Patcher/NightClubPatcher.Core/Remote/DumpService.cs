@@ -57,62 +57,81 @@ public sealed class DumpService
     {
         outputDir ??= DownloadsFolder();
         _log.Step("Dumping the game's IL2CPP metadata from the headset");
+        try
+        {
+            Directory.CreateDirectory(outputDir);
+        }
+        catch (Exception ex)
+        {
+            return new DumpResult(false, $"Cannot write to {outputDir}: {ex.Message}");
+        }
         if (_adb.Pid(GameConstants.PackageName) == null)
             return new DumpResult(false, "NightClub Simulator is not running. Start the patched game on the headset, wait until it is loaded, then dump.");
 
         var port = _adb.Forward("localabstract:" + SocketName);
         if (port == null) return new DumpResult(false, "adb forward failed (is the headset connected and authorized?).");
         var tmp = Path.Combine(outputDir, $".ncmk-dump-{Guid.NewGuid():N}.part");
+        string? final = null;
         try
         {
-            Directory.CreateDirectory(outputDir);
-            using var client = new TcpClient();
-            using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
-            {
-                connectCts.CancelAfter(TimeSpan.FromSeconds(10));
-                await client.ConnectAsync("127.0.0.1", port.Value, connectCts.Token);
-            }
-            await using var stream = client.GetStream();
             DumpProtocolResult r;
-            await using (var file = File.Create(tmp))
+            try
             {
+                using var client = new TcpClient();
+                using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    connectCts.CancelAfter(TimeSpan.FromSeconds(10));
+                    await client.ConnectAsync("127.0.0.1", port.Value, connectCts.Token);
+                }
+                await using var stream = client.GetStream();
+                await using var file = File.Create(tmp);
                 r = await DumpProtocol.RunAsync(stream, file, (done, total, what) =>
                 {
                     var frac = total > 0 ? (double)done / total : 0;
                     _log.ReportProgress("dump", $"Dump: {KitLog.ProgressBar(frac)}  {done}/{total} classes  {what}", frac);
                 }, ct);
             }
-            _log.EndProgress("dump");
-            if (!r.Ok)
+            catch (SocketException ex)
             {
-                File.Delete(tmp);
-                return new DumpResult(false, r.Error ?? "The dump failed.");
+                return new DumpResult(false, NoAnswerMessage + " (" + ex.Message + ")");
             }
+            catch (IOException ex)
+            {
+                return new DumpResult(false, "The dump stopped: " + ex.Message);
+            }
+            catch (OperationCanceledException)
+            {
+                return new DumpResult(false, "Dump cancelled.");
+            }
+
+            if (r.NoAnswer) return new DumpResult(false, NoAnswerMessage);
+            if (!r.Ok) return new DumpResult(false, r.Error ?? "The dump failed.");
             var name = $"NCMK-dump-{Sanitize(r.GameVersion)}-{DateTime.Now:yyyyMMdd-HHmmss}.cs";
-            var final = Path.Combine(outputDir, name);
+            final = Path.Combine(outputDir, name);
             File.Move(tmp, final);
             _log.Success($"Dump saved: {final} ({r.Classes} classes, {r.Methods} methods, {r.Bytes / 1048576.0:0.0} MB)");
             return new DumpResult(true, "Dump saved to " + final, final, r.Bytes, r.Classes, r.Methods);
         }
-        catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException)
-        {
-            _log.EndProgress("dump");
-            try { File.Delete(tmp); } catch { /* ignore */ }
-            return new DumpResult(false,
-                "The NCMK loader in the game did not answer (" + ex.Message + "). Make sure the running game was patched with this " +
-                "NCMK version and has finished starting.");
-        }
         finally
         {
+            _log.EndProgress("dump");
+            if (final == null || !File.Exists(final))
+                try { File.Delete(tmp); } catch { /* ignore */ }
             _adb.RemoveForward(port.Value);
         }
     }
+
+    private const string NoAnswerMessage =
+        "The game is running but its NCMK command socket (@ncmk) did not answer. Usual causes: the installed game was patched with an " +
+        "older NCMK version (patch again), it is still starting (wait until the menu or Loading screen shows), or \"remoteCommands\" " +
+        "is false in config.json.";
 
     private static string Sanitize(string? s) =>
         string.IsNullOrWhiteSpace(s) ? "unknown" : new string(s.Select(c => char.IsLetterOrDigit(c) || c == '.' ? c : '_').ToArray());
 }
 
-public sealed record DumpProtocolResult(bool Ok, string? Error, string? GameVersion, long Bytes, int Classes, int Methods);
+/// <param name="NoAnswer">Nothing came back: adb forward accepts the connection even when nobody listens on @ncmk.</param>
+public sealed record DumpProtocolResult(bool Ok, string? Error, string? GameVersion, long Bytes, int Classes, int Methods, bool NoAnswer = false);
 
 /// <summary>Client side of the loader's line/chunk protocol (see Native/Remote/command_server.h).</summary>
 public static class DumpProtocol
@@ -121,9 +140,18 @@ public static class DumpProtocol
         CancellationToken ct = default, TimeSpan? idleTimeout = null)
     {
         var reader = new ChunkReader(stream, idleTimeout ?? TimeSpan.FromSeconds(120));
-        var hello = await reader.ReadLineAsync(ct);
-        if (hello == null || !hello.StartsWith("NCMK ", StringComparison.Ordinal))
-            return new DumpProtocolResult(false, "Unexpected answer from the game: " + (hello ?? "(nothing)"), null, 0, 0, 0);
+        string? hello;
+        try
+        {
+            hello = await reader.ReadLineAsync(ct);
+        }
+        catch (IOException)
+        {
+            hello = null;
+        }
+        if (hello == null) return new DumpProtocolResult(false, "No answer from the game.", null, 0, 0, 0, NoAnswer: true);
+        if (!hello.StartsWith("NCMK ", StringComparison.Ordinal))
+            return new DumpProtocolResult(false, "Unexpected answer from the game: " + hello, null, 0, 0, 0);
         var parts = hello.Split(' ');
         var gameVersion = parts.Length >= 5 ? parts[4] : null;
         var cmd = Encoding.ASCII.GetBytes("DUMP\n");
