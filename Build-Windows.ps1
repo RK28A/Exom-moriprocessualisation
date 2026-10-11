@@ -141,6 +141,15 @@ foreach ($dir in "Native", "SDK", "Mods") {
         Copy-Item $_.FullName $target -Force
     }
 }
+# Every source file must be in the Release folder, or "Build Native Loader" fails there.
+foreach ($dir in "Native", "SDK", "Mods") {
+    $src = Join-Path $Root $dir
+    Get-ChildItem $src -Recurse -File -Include *.cpp, *.c, *.h, *.hpp, CMakeLists.txt | ForEach-Object {
+        $rel = $_.FullName.Substring($src.Length).TrimStart('\', '/')
+        if ($rel -match '^(build[^\\/]*|out)[\\/]') { return }
+        if (-not (Test-Path (Join-Path (Join-Path $Output $dir) $rel))) { throw "Release is missing $dir\$rel" }
+    }
+}
 Write-Host "  copied Native\, SDK\ and Mods\ sources (for Build Native Loader)"
 
 # Prebuilt native payload (when available) goes exactly where the patcher looks for it.

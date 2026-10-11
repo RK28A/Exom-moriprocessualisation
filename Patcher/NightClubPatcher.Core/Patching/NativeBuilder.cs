@@ -32,6 +32,18 @@ public sealed class NativeBuilder
         File.Exists(Path.Combine(NativeDir, "CMakeLists.txt")) &&
         File.Exists(Path.Combine(_paths.Root, "SDK", "Core", "ncmk_mod_api.h"));
 
+    /// <summary>Mods/&lt;Name&gt;/ folders with C/C++ sources (each one becomes libncmkmod_&lt;name&gt;.so).</summary>
+    public List<string> ModSourceDirs()
+    {
+        var root = Path.Combine(_paths.Root, "Mods");
+        if (!Directory.Exists(root)) return new List<string>();
+        return Directory.EnumerateDirectories(root)
+            .Where(d => Directory.EnumerateFiles(d, "*.*", SearchOption.AllDirectories)
+                .Any(f => f.EndsWith(".cpp", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".c", StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     /// <summary>Loader built and valid (AArch64 ELF).</summary>
     public bool LoaderReady(out string? path)
     {
@@ -46,6 +58,12 @@ public sealed class NativeBuilder
         _log.Step("Checking native build tools");
         if (!SourcesPresent)
             return new NativeBuildResult(false, $"Native sources not found in {NativeDir} (CMakeLists.txt and SDK/ are required).", null, Array.Empty<string>());
+
+        var mods = ModSourceDirs();
+        if (mods.Count == 0)
+            _log.Warn($"No mod sources in {Path.Combine(_paths.Root, "Mods")} - building the loader only (sample mods skipped).");
+        else
+            _log.Info("Mods to build: " + string.Join(", ", mods.Select(Path.GetFileName)));
 
         var ndk = _tools.FindNdk();
         var cmake = _tools.FindCMake();
