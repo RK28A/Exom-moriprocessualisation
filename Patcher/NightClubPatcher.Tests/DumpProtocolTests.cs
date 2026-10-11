@@ -61,6 +61,11 @@ public class DumpProtocolTests
         Assert.False(r.Ok);
         Assert.Contains("not ready", r.Error);
 
+        // adb forward accepts the connection even when nothing listens on @ncmk: no bytes at all.
+        r = await DumpProtocol.RunAsync(new Duplex(Server()), new MemoryStream(), (_, _, _) => { });
+        Assert.False(r.Ok);
+        Assert.True(r.NoAnswer);
+
         r = await DumpProtocol.RunAsync(new Duplex(Server("HTTP/1.1 400\n")), new MemoryStream(), (_, _, _) => { });
         Assert.False(r.Ok);
         Assert.Contains("Unexpected answer", r.Error);

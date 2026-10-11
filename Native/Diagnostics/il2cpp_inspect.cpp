@@ -388,6 +388,13 @@ int InstallProbe(const char* tag, const MethodInfo* method, ProbeCallback callba
     return i;
 }
 
+void* ProbeOriginalFor(const void* entry) {
+    if (!entry) return nullptr;
+    for (int i = 0; i < g_probeCount; ++i)
+        if (g_probes[i].entry == entry) return g_probes[i].original;
+    return nullptr;
+}
+
 const char* ProbeTag(int probeId) {
     return probeId >= 0 && probeId < g_probeCount ? g_probes[probeId].tag : "?";
 }

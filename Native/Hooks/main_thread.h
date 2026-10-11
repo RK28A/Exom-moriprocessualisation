@@ -46,6 +46,9 @@ using FrameHandler = void (*)(const Frame& frame);
 int Install(const std::vector<Target>& targets, FrameHandler handler,
             std::chrono::milliseconds perTarget = std::chrono::milliseconds(5000));
 
+/// The game's original method pointer when `entry` is one of the dispatcher's entry points, else null.
+void* OriginalFor(const void* entry);
+
 /// Restores every swapped MethodInfo slot (idempotent). Called on unload.
 void Restore();
 

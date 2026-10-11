@@ -363,6 +363,13 @@ int Install(const std::vector<Target>& targets, FrameHandler handler, std::chron
     return w;
 }
 
+void* OriginalFor(const void* entry) {
+    if (!entry) return nullptr;
+    for (int i = 0; i < kMaxHooks; ++i)
+        if (g_hooks[i].entry == entry && g_hooks[i].original) return g_hooks[i].original;
+    return nullptr;
+}
+
 void Restore() {
     Runtime& r = R();
     int prev = r.state.exchange(kStopped);

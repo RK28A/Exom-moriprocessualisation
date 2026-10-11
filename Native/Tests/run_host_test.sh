@@ -209,6 +209,9 @@ expect "$DUMP_OUT" "static bl_SceneLoaderManager m_Instance; // 0x0"
 expect "$DUMP_OUT" "const System.Int32 One = 1;"
 expect "$DUMP_OUT" "// RVA: 0x"
 expect "$DUMP_OUT" "// RVA: -1 Offset: -1"
+expect "$DUMP_OUT" "System.Int32 m_Handle; // 0x0"   # struct field: offset inside the unboxed value
+# ExecuteTasks is the dispatcher's hooked method: the dump must show the game's code, not NCMK's entry.
+if grep -B2 "ExecuteTasks() { }" "$DUMP_OUT" | grep -q "// RVA: 0x"; then echo "PASS  hooked method shows the game's RVA"; else echo "FAIL  hooked method RVA"; FAILED=1; fi
 
 # 8) Drop-in mod: a mod is ONE folder in Mods/ (mod.json + .cpp). Built in a temporary copy of the
 #    kit, so no tracked file changes. Also: .disabled folders, folders without mod.json, stale
