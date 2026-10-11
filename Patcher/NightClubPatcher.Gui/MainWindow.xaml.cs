@@ -105,6 +105,7 @@ public partial class MainWindow : Window
         _logView.Filter = o => o is LogEntry e && PassesFilter(e);
 
         _svc.Log.Message += (level, msg) => Dispatcher.BeginInvoke(() => OnLog(level, msg));
+        _svc.Log.Progress += (key, text, fraction) => Dispatcher.BeginInvoke(() => OnProgress(key, text, fraction));
         _clock.Tick += (_, _) => ActivityTime.Text = _opWatch.IsRunning ? $"{_opWatch.Elapsed:mm\\:ss}" : ActivityTime.Text;
         _watcher.Tick += async (_, _) => await WatchDevicesAsync();
         SubtitleText.Text = $"NCMK {typeof(ModKitService).Assembly.GetName().Version?.ToString(3)} - com.mandegames.NightClubSimulater - Quest 2 / Pro / 3 / 3S";
@@ -135,22 +136,8 @@ public partial class MainWindow : Window
     private void ApplySettings()
     {
         _loadingSettings = true;
-        foreach (var m in GameDataModes.All) DataModeCombo.Items.Add(m.Label());
-        var mode = _settings.GameDataMode;
-        DataModeCombo.SelectedIndex = Array.IndexOf(GameDataModes.All, mode);
-        _svc.DataMode = mode;
         LaunchAfterInstall.IsChecked = _settings.LaunchAfterInstall;
         _loadingSettings = false;
-    }
-
-    private void DataMode_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-    {
-        if (_loadingSettings || DataModeCombo.SelectedIndex < 0) return;
-        var mode = GameDataModes.All[DataModeCombo.SelectedIndex];
-        _svc.DataMode = mode;
-        _settings.DataMode = mode.CliName();
-        _settings.Save();
-        _svc.Log.Info("Game data mode: " + mode.Label());
     }
 
     private void LaunchAfterInstall_Changed(object sender, RoutedEventArgs e)
@@ -185,6 +172,32 @@ public partial class MainWindow : Window
         _log.Add(new LogEntry { Time = DateTime.Now.ToString("HH:mm:ss"), Level = level, Glyph = glyph, Text = msg, Brush = brush, Weight = weight });
         if (_log.Count > 5000) _log.RemoveAt(0);
         if (AutoScroll.IsChecked == true && LogList.Items.Count > 0) LogList.ScrollIntoView(LogList.Items[^1]);
+    }
+
+    private readonly Dictionary<string, LogEntry> _progressLines = new();
+
+    /// <summary>One log line per running copy, updated in place; the progress bar follows it.</summary>
+    private void OnProgress(string key, string? text, double? fraction)
+    {
+        _progressLines.TryGetValue(key, out var old);
+        if (text == null)
+        {
+            if (old != null) _log.Remove(old);
+            _progressLines.Remove(key);
+            if (_busy) Progress.IsIndeterminate = true;
+            return;
+        }
+        var entry = new LogEntry { Time = DateTime.Now.ToString("HH:mm:ss"), Level = LogLevel.Info, Glyph = "⏳", Text = text, Brush = Palette.Accent };
+        var index = old != null ? _log.IndexOf(old) : -1;
+        if (index >= 0) _log[index] = entry;
+        else _log.Add(entry);
+        _progressLines[key] = entry;
+        if (fraction is { } f)
+        {
+            Progress.IsIndeterminate = false;
+            Progress.Value = f * 100;
+        }
+        if (index < 0 && AutoScroll.IsChecked == true && LogList.Items.Count > 0) LogList.ScrollIntoView(LogList.Items[^1]);
     }
 
     private bool PassesFilter(LogEntry e) => LogFilter.SelectedIndex switch
@@ -660,29 +673,6 @@ public partial class MainWindow : Window
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
-
-    private async void ListData_Click(object sender, RoutedEventArgs e)
-    {
-        await RunAsync("List game data", async () =>
-        {
-            var text = await Task.Run(() => _svc.ListGameData(_ui));
-            _lastResult = true;
-            ErrorDialog.Show(this, "Game data on the headset", "Files the game stores where adb can reach them:", text, null, isError: false);
-        });
-    }
-
-    private async void BackupData_Click(object sender, RoutedEventArgs e)
-    {
-        await RunAsync("Backup game data", async () =>
-        {
-            var b = await Task.Run(() => _svc.BackupGameData(_ui));
-            if (b == null) { Report("BACKUP GAME DATA", false, "No headset connected."); return; }
-            _lastResult = b.AccessibleDataComplete;
-            ErrorDialog.Show(this, b.AccessibleDataComplete ? "Game data saved" : "Game data backup INCOMPLETE",
-                b.AccessibleDataComplete ? "Every file adb can reach was saved and verified." : "Some files could not be saved - see the details.",
-                b.Describe(), b.Directory, isError: !b.AccessibleDataComplete);
-        });
-    }
 
     private async void Emergency_Click(object sender, RoutedEventArgs e)
     {

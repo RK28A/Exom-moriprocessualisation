@@ -200,8 +200,6 @@
           <WrapPanel Margin="0,2,0,6">
             <Button Content="Detect / Refresh" Click="Refresh_Click" ToolTip="Re-detect ADB, headset, game and backup"/>
             <Button Content="Backup Original" Click="Backup_Click"/>
-            <Button Content="List Game Data" Click="ListData_Click" ToolTip="Show every file the game stores in Android/data and Android/obb"/>
-            <Button Content="Backup Game Data" Click="BackupData_Click" ToolTip="Save Android/data and Android/obb now (verified file by file)"/>
             <Button Content="Unpatch" Click="Unpatch_Click"/>
             <Button Content="Start Safe Mode" Click="SafeMode_Click"/>
             <Button Content="Diagnose" Click="Diagnose_Click"/>
@@ -212,10 +210,7 @@
           </WrapPanel>
           <WrapPanel Margin="2,0,0,12" VerticalAlignment="Center">
             <CheckBox x:Name="LaunchAfterInstall" Content="Launch the game after install" IsChecked="True" VerticalAlignment="Center"
-                      Margin="0,0,24,0" Checked="LaunchAfterInstall_Changed" Unchecked="LaunchAfterInstall_Changed"/>
-            <TextBlock Text="Game Data Mode" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-            <ComboBox x:Name="DataModeCombo" Width="190" SelectionChanged="DataMode_Changed"
-                      ToolTip="What happens to the game data when a signature mismatch forces a reinstall.&#x0a;Normal restore: back up, reinstall, restore.&#x0a;Backup only: back up, reinstall, do not restore.&#x0a;Skip restore: no backup, no restore.&#x0a;Clean install: back up for safety, reinstall, start with fresh data."/>
+                      Checked="LaunchAfterInstall_Changed" Unchecked="LaunchAfterInstall_Changed"/>
           </WrapPanel>
         </StackPanel>
 

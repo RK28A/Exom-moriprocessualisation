@@ -12,6 +12,23 @@ public sealed class KitLog
 
     public event Action<LogLevel, string>? Message;
 
+    /// <summary>
+    /// Live progress of a long copy: (key, text, fraction 0..1). UIs show it as one line that updates
+    /// in place (not written to the log file); <see cref="EndProgress"/> removes it.
+    /// </summary>
+    public event Action<string, string?, double?>? Progress;
+
+    public void ReportProgress(string key, string text, double? fraction) => Progress?.Invoke(key, text, fraction);
+    public void EndProgress(string key) => Progress?.Invoke(key, null, null);
+
+    /// <summary>"[██████░░░░░░] 57/173 files · 12.3/40 MB · 31%".</summary>
+    public static string ProgressBar(double fraction, int width = 20)
+    {
+        var f = Math.Clamp(fraction, 0, 1);
+        var full = (int)Math.Round(f * width);
+        return "[" + new string('█', full) + new string('░', width - full) + $"] {f * 100,3:0}%";
+    }
+
     public KitLog(string? logDirectory)
     {
         if (logDirectory == null) return;

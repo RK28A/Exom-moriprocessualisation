@@ -331,7 +331,6 @@ NightClubPatcher.Cli.exe --device <serial> --patch-install   use that headset, n
 ```
 
 Options: `--allow-unverified`, `--no-mods`, `--loader <path>`, `--mods keep|disable|delete`,
-`--data keep|backup-only|skip|clean` (game data on a signature-mismatch reinstall, below),
 `--non-interactive` (never confirms anything destructive), `--verbose`.
 
 ---
@@ -346,19 +345,16 @@ Options: `--allow-unverified`, `--no-mods`, `--loader <path>`, `--mods keep|disa
 | Never edit the backup | all work happens on a copy in `%TEMP%\NCMK\…` |
 | Unknown update ⇒ no auto patch | version profile + SHA-256 of libmain/libunity/libil2cpp/global-metadata → `KNOWN BUILD` / `UNKNOWN GAME UPDATE` |
 | One permanent signing key | `Keys/NCMK.keystore`, never regenerated automatically (back it up!) |
-| Signature mismatch | detected up front (installed signer hash from `dumpsys package`) and on `INSTALL_FAILED_UPDATE_INCOMPATIBLE` → *Cancel* / *Backup accessible data and reinstall* |
-| Game data mode | GUI *Game Data Mode* (saved in `%APPDATA%\NCMK\gui-settings.json`) / CLI `--data`: **Normal restore** (`keep`: back up, reinstall, restore) · **Backup only** (`backup-only`: back up, do not restore) · **Skip restore** (`skip`: no backup, no restore) · **Clean install** (`clean`: back up for safety, remove leftovers, fresh data). A failed restore never fails the install or blocks the launch; the backup stays in `Backups\UserData` |
-| Game data restore | only files verified during the backup are pushed; caches (`cache/`, `files/il2cpp/`, PSO cache) and NCMK binaries/logs are not restored; every file is checked by size and MD5 after backup and after restore |
+| Signature mismatch | detected up front (installed signer hash from `dumpsys package`) and on `INSTALL_FAILED_UPDATE_INCOMPATIBLE` → *Cancel* / *Uninstall and reinstall* (the game's local data, only a few settings, is reset; nothing is backed up) |
 | Unpinned build | patching asks *Pin fingerprints and continue* (pins the verified original backup, then patches) |
-| No silent data loss | uninstall only after explicit confirmation; accessible data backed up to `Backups/<pkg>/userdata/<ts>/` and restored |
+| No silent uninstall | uninstall only after explicit confirmation |
 | Mod files survive restore | `…/files/NCMKMods` → Keep / rename to `NCMKMods.disabled` / Delete (asked) |
 | Older kits | APKs patched by NightClubModKit (`libncsloader.so`, `libncsmod_*.so`) are detected and fully unpatched; `Keys/NightClubModKit.keystore` is migrated to `Keys/NCMK.keystore` (same key) |
 | Meta entitlement / bans | no bypass, spoofing or evasion of the game's entitlement check (`MetaAccount.OnUseEntitlement`) or its server-side ban system; **Diagnose** reports an entitlement failure |
 | Crash protection | `patched-current.apk` + `patched-previous.apk`, Safe Mode, Restore Original |
 
 **RESTORE ORIGINAL** verifies the backup (hash, package, version, no ModKit markers), stops the
-game, installs the original (uninstalling the modded build only after confirmation and data
-backup), handles the mod folder, then verifies package, version, developer signature, absence
+game, installs the original (uninstalling the modded build only after confirmation), handles the mod folder, then verifies package, version, developer signature, absence
 of the loader and the installed APK hash.
 
 **EMERGENCY RESTORE** needs nothing but an `original.apk` (it works without `backup.json`,
@@ -370,28 +366,8 @@ RESTORE ORIGINAL remains the safest option.
 
 ### About user data
 
-Before any uninstall (only ever after your confirmation) the patcher backs up what adb can reach
-and **verifies it file by file**:
-
-1. **Inventory** — every file of `/sdcard/Android/data/<pkg>` and `/sdcard/Android/obb/<pkg>`
-   with its size (shown in the log and written to `inventory.txt`).
-2. **Several copy methods**, tried in order until every file is saved with the right size:
-   `adb pull` → `adb pull` through `/storage/emulated/0` → tar stream (`adb exec-out tar`) →
-   copy to `/sdcard/Download/NCMK-staging` then pull (staging deleted afterwards) →
-   file-by-file pull of whatever is still missing.
-3. **Exact report** — e.g. `Android/data: 12/12 files saved (3.4 MB) - complete, verified (method:
-   tar stream)` or the list of missing files and why the folder could not be read.
-4. **Explicit decision** — if anything is missing the default is **Cancel (keep the current game
-   untouched)**; continuing requires choosing *"Continue anyway - I accept losing the missing
-   data"*.
-
-`/data/data/<pkg>` (e.g. Unity `PlayerPrefs`) cannot be read without root on store builds, so it is
-always reported as not saved. After reinstalling, the saved files are pushed back (with a tar
-upload fallback) and verified on the headset.
-
-You can inspect and save the data at any time without touching the game: **List Game Data** /
-**Backup Game Data** in the app, or `NightClubPatcher.Cli.exe --list-data` / `--backup-data`.
-Backups are kept in `Backups\com.mandegames.NightClubSimulater\userdata\<date>\`.
+NCMK does not back up or restore game data. The game keeps almost nothing (a few settings);
+when a signature change forces an uninstall, it simply starts with fresh data.
 
 ## Writing mods
 

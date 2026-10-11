@@ -59,7 +59,6 @@ public sealed class KitPaths
     public string LegacyKeystorePath => Path.Combine(Keys, "NightClubModKit.keystore");
 
     public string BackupRoot => Path.Combine(Backups, GameConstants.PackageName);
-    public string UserDataBackupRoot => Path.Combine(BackupRoot, "userdata");
 
     public string BackupDir(string versionName, long versionCode) =>
         Path.Combine(BackupRoot, $"{Sanitize(versionName)}-{versionCode}");
