@@ -60,6 +60,12 @@ internal static class Program
           --no-mods                    Do not embed libncmkmod_*.so into the APK
           --loader <path>              Use a specific libncmkloader.so
           --mods keep|disable|delete   What to do with NCMKMods on restore (default: ask)
+          --data keep|backup-only|skip|clean
+                                       Game data on a signature-mismatch reinstall (default: keep)
+                                         keep         back up, reinstall, restore
+                                         backup-only  back up, reinstall, do not restore
+                                         skip         no backup, no restore
+                                         clean        back up for safety, reinstall, start with fresh data
           --no-install                 (with --unpatch) only build the APK
           --non-interactive            Never prompt; destructive choices are cancelled
         """;
@@ -91,6 +97,17 @@ internal static class Program
         IUserInteraction ui = args.Contains("--non-interactive") ? new NonInteractive(svc.Log) : new ConsoleInteraction();
 
         if (args.Contains("--bundled-only")) { svc.Tools.BundledOnly = true; svc.ReloadTools(); }
+
+        if (args.Contains("--data"))
+        {
+            if (!GameDataModes.TryParse(Value(args, "--data"), out var mode))
+            {
+                Console.WriteLine("Usage: --data keep|backup-only|skip|clean");
+                return 1;
+            }
+            svc.DataMode = mode;
+            svc.Log.Info("Game data mode: " + mode.CliName());
+        }
 
         var serial = Value(args, "--device");
         if (args.Contains("--device"))

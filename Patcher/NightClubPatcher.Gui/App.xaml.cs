@@ -25,6 +25,27 @@ public partial class App : Application
         base.OnStartup(e);
     }
 
+    // Custom title bar buttons (NcmkWindow style in App.xaml).
+    private static Window? OwnerOf(object sender) => sender is DependencyObject d ? Window.GetWindow(d) : null;
+
+    private void CaptionMinimize_Click(object sender, RoutedEventArgs e)
+    {
+        if (OwnerOf(sender) is { } w) w.WindowState = WindowState.Minimized;
+    }
+
+    private void CaptionMaximize_Click(object sender, RoutedEventArgs e)
+    {
+        if (OwnerOf(sender) is { } w) w.WindowState = w.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    }
+
+    private void CaptionClose_Click(object sender, RoutedEventArgs e) => OwnerOf(sender)?.Close();
+
+    /// <summary>Applies the dark NCMK window style (custom title bar + logo) to a window built in code.</summary>
+    public static void ApplyChrome(Window w)
+    {
+        if (Current?.TryFindResource("NcmkWindow") is Style style) w.Style = style;
+    }
+
     private void OnDispatcherUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         e.Handled = true;

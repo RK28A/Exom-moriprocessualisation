@@ -89,11 +89,15 @@ public partial class MainWindow : Window
     public bool AllowUnverified { get; set; }
     public bool EmbedMods { get; set; } = true;
 
+    private readonly GuiSettings _settings = GuiSettings.Load();
+    private bool _loadingSettings;
+
     public MainWindow()
     {
         InitializeComponent();
         _svc = new ModKitService();
         _ui = new WpfInteraction(this);
+        ApplySettings();
 
         LogList.ItemsSource = _log;
         StepsList.ItemsSource = _steps;
@@ -125,6 +129,36 @@ public partial class MainWindow : Window
     }
 
     public ModKitService Service => _svc;
+
+    // ------------------------------------------------------------------ settings
+
+    private void ApplySettings()
+    {
+        _loadingSettings = true;
+        foreach (var m in GameDataModes.All) DataModeCombo.Items.Add(m.Label());
+        var mode = _settings.GameDataMode;
+        DataModeCombo.SelectedIndex = Array.IndexOf(GameDataModes.All, mode);
+        _svc.DataMode = mode;
+        LaunchAfterInstall.IsChecked = _settings.LaunchAfterInstall;
+        _loadingSettings = false;
+    }
+
+    private void DataMode_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_loadingSettings || DataModeCombo.SelectedIndex < 0) return;
+        var mode = GameDataModes.All[DataModeCombo.SelectedIndex];
+        _svc.DataMode = mode;
+        _settings.DataMode = mode.CliName();
+        _settings.Save();
+        _svc.Log.Info("Game data mode: " + mode.Label());
+    }
+
+    private void LaunchAfterInstall_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingSettings) return;
+        _settings.LaunchAfterInstall = LaunchAfterInstall.IsChecked == true;
+        _settings.Save();
+    }
 
     // ------------------------------------------------------------------ activity log
 

@@ -16,7 +16,7 @@ public sealed class WpfInteraction : IUserInteraction
         _owner.Dispatcher.Invoke(() => ChoiceDialog.Show(_owner, title, message, options));
 
     public void Notify(string title, string message) =>
-        _owner.Dispatcher.Invoke(() => MessageBox.Show(_owner, message, title, MessageBoxButton.OK, MessageBoxImage.Information));
+        _owner.Dispatcher.Invoke(() => ErrorDialog.Show(_owner, title, message, isError: false));
 }
 
 /// <summary>Message box with arbitrary option buttons. Closing the window means "cancel" (-1).</summary>
@@ -35,6 +35,7 @@ public static class ChoiceDialog
             ResizeMode = ResizeMode.NoResize,
             Background = (Brush)Application.Current.Resources["Bg"],
         };
+        App.ApplyChrome(win);
         var root = new StackPanel { Margin = new Thickness(20) };
         root.Children.Add(new TextBlock
         {

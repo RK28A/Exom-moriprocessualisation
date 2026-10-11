@@ -8,12 +8,16 @@ public sealed record InstallResult(bool Ok, string Message, bool Reinstalled = f
 
 /// <summary>
 /// Installs an APK on the Quest. If the installed build is signed with a different key it never
-/// uninstalls silently: the user must choose "Backup accessible data and reinstall".
+/// uninstalls silently: the user confirms, and <see cref="DataMode"/> decides what happens to the
+/// game data (back up + restore, back up only, nothing, or a clean install).
 /// </summary>
 public sealed class InstallService
 {
     private readonly KitLog _log;
     private readonly UserDataService _userData;
+
+    /// <summary>What a signature-mismatch reinstall does with the game's external data.</summary>
+    public GameDataMode DataMode { get; set; } = GameDataMode.Keep;
 
     public InstallService(KitLog log, UserDataService userData)
     {
@@ -42,38 +46,67 @@ public sealed class InstallService
             _log.Warn("Android reported a signature conflict.");
         }
 
+        var mode = DataMode;
+        var dataPlan = mode switch
+        {
+            GameDataMode.BackupOnly => "Game data mode: Backup only. Accessible data (/sdcard/Android/data and obb) will be backed up but NOT restored.",
+            GameDataMode.Skip => "Game data mode: Skip. NO backup is made and nothing is restored: the game's external data is lost by the uninstall.",
+            GameDataMode.Clean => "Game data mode: Clean install. Accessible data is backed up for safety, then the game starts with fresh data (nothing is restored).",
+            _ => "Accessible data (/sdcard/Android/data and obb) will be backed up and restored.",
+        };
         var choice = ui.Choose("Signature mismatch detected",
             "Signature mismatch detected." + Environment.NewLine + Environment.NewLine +
             "The installed build and the build to install use different keys." + Environment.NewLine +
             "Android requires uninstalling the current game first." + Environment.NewLine + Environment.NewLine +
-            "Accessible data (/sdcard/Android/data and obb) will be backed up and restored." + Environment.NewLine +
+            dataPlan + Environment.NewLine +
             "Internal data (/data/data) cannot be read without root and may be lost (Meta cloud backup may restore it).",
-            new[] { "Cancel", "Backup accessible data and reinstall" });
+            new[] { "Cancel", mode.BacksUp() ? "Backup accessible data and reinstall" : "Reinstall without backup" });
         if (choice != 1) return new InstallResult(false, "Installation cancelled by user. Nothing was changed.");
 
-        var data = _userData.Backup(adb);
+        UserDataBackup? data = null;
+        if (mode.BacksUp())
+        {
+            data = _userData.Backup(adb);
 
-        // Always show exactly what was (and was not) saved before anything is uninstalled.
-        var complete = data.AccessibleDataComplete;
-        var message = (complete
-                          ? "All game data adb can reach was saved and verified file by file:"
-                          : "WARNING: the game data backup is INCOMPLETE. Uninstalling now can lose your progress.") +
-                      Environment.NewLine + Environment.NewLine + data.Describe() + Environment.NewLine + Environment.NewLine +
-                      "The full file list is in inventory.txt in the backup folder." + Environment.NewLine +
-                      (complete
-                          ? "Continue = uninstall the current game, install the new build, restore the saved files."
-                          : "Recommended: Cancel. Nothing has been uninstalled; your game and its data are untouched.");
-        var options = complete
-            ? new[] { "Cancel", "Uninstall, install and restore data" }
-            : new[] { "Cancel (keep the current game untouched)", "Continue anyway - I accept losing the missing data" };
-        if (ui.Choose(complete ? "Game data saved - confirm reinstall" : "Game data backup INCOMPLETE", message, options) != 1)
-            return new InstallResult(false,
-                "Cancelled before uninstalling. Nothing was changed on the headset. Data backup kept in " + data.Directory, false, data);
+            // Always show exactly what was (and was not) saved before anything is uninstalled.
+            var complete = data.AccessibleDataComplete;
+            var after = mode.Restores()
+                ? "Continue = uninstall the current game, install the new build, restore the saved files."
+                : "Continue = uninstall the current game and install the new build. The saved files are NOT restored (" +
+                  mode.Label() + "); they stay in the backup folder.";
+            var message = (complete
+                              ? "All game data adb can reach was saved and verified file by file:"
+                              : "WARNING: the game data backup is INCOMPLETE. Uninstalling now can lose your progress.") +
+                          Environment.NewLine + Environment.NewLine + data.Describe() + Environment.NewLine + Environment.NewLine +
+                          "The full file list is in inventory.txt in the backup folder." + Environment.NewLine +
+                          (complete ? after : "Recommended: Cancel. Nothing has been uninstalled; your game and its data are untouched.");
+            var options = complete
+                ? new[] { "Cancel", mode.Restores() ? "Uninstall, install and restore data" : "Uninstall and install" }
+                : new[] { "Cancel (keep the current game untouched)", "Continue anyway - I accept losing the missing data" };
+            if (ui.Choose(complete ? "Game data saved - confirm reinstall" : "Game data backup INCOMPLETE", message, options) != 1)
+                return new InstallResult(false,
+                    "Cancelled before uninstalling. Nothing was changed on the headset. Data backup kept in " + data.Directory, false, data);
+        }
+        else
+        {
+            _log.Warn("Game data mode Skip: no backup of the game data is made.");
+        }
 
         _log.Step("Uninstalling the current build");
         var un = adb.Uninstall(GameConstants.PackageName);
         if (!un.Ok || !un.Combined.Contains("Success"))
             return new InstallResult(false, "Uninstall failed: " + un.Combined, false, data);
+
+        if (mode == GameDataMode.Clean)
+        {
+            // Android normally removes these with the package; make sure nothing old is left behind.
+            foreach (var dir in new[] { GameConstants.DeviceExternalData, GameConstants.DeviceObbDir })
+                if (adb.RemoteExists(dir))
+                {
+                    adb.Shell($"rm -rf \"{dir}\"");
+                    _log.Info("Clean install: removed leftover " + dir);
+                }
+        }
 
         _log.Step($"Installing {Path.GetFileName(apk)} ({purpose})");
         var inst = DoInstall(adb, apk, splits);
@@ -82,11 +115,38 @@ public sealed class InstallService
             _log.Error("Install failed after uninstall: " + inst.Combined);
             return new InstallResult(false,
                 "INSTALL FAILED after uninstall: " + inst.Combined + Environment.NewLine +
-                "Your data backup is in " + data.Directory + ". Use RESTORE ORIGINAL or EMERGENCY RESTORE.", true, data);
+                (data != null ? "Your data backup is in " + data.Directory + ". " : "") + "Use RESTORE ORIGINAL or EMERGENCY RESTORE.", true, data);
         }
 
-        _userData.Restore(adb, data);
-        return Verify(adb, apk, new InstallResult(true, "Reinstalled with data restore.", true, data));
+        var note = mode switch
+        {
+            GameDataMode.BackupOnly => "Reinstalled; game data backed up but not restored (Backup only).",
+            GameDataMode.Skip => "Reinstalled without game data backup or restore (Skip).",
+            GameDataMode.Clean => "Reinstalled clean; the game creates fresh data on first launch.",
+            _ => "Reinstalled with data restore.",
+        };
+        if (mode.Restores() && data != null)
+        {
+            // A failed restore never fails the install: the game is installed and can be launched;
+            // the backup stays on the PC.
+            bool restored;
+            try { restored = _userData.Restore(adb, data); }
+            catch (Exception ex)
+            {
+                restored = false;
+                _log.Error("Game data restore failed: " + ex.Message);
+            }
+            if (!restored)
+            {
+                note = "Reinstalled. Game data restore was INCOMPLETE; the backup is kept in " + data.Directory + ".";
+                _log.Warn(note);
+            }
+        }
+        else if (data != null)
+        {
+            _log.Info("Game data not restored (" + mode.Label() + "). Backup kept in " + data.Directory);
+        }
+        return Verify(adb, apk, new InstallResult(true, note, true, data));
     }
 
     private static ProcessResult DoInstall(AdbClient adb, string apk, IReadOnlyList<string> splits) =>

@@ -128,8 +128,11 @@ changes needed.
 
 ## Portable tools (Install / Repair Tools)
 
-Everything is downloaded **into the NCMK folder**, never system-wide, and the user's
-`PATH` is never modified (tools are prepended to the PATH of the build process only):
+Tools are downloaded once per PC into `%LOCALAPPDATA%\NCMK\Tools`, never system-wide, and the user's
+`PATH` is never modified (tools are prepended to the PATH of the build process only). Before
+downloading anything NCMK checks the kit's own `Tools\`, that shared folder, the `Tools\` folders of
+other NCMK copies next to the kit and the Android SDK, so unzipping a new kit does not reinstall
+anything (`--bundled-only` keeps everything in the kit's `Tools\`). Layout of a tools folder:
 
 ```
 Release\
@@ -328,6 +331,7 @@ NightClubPatcher.Cli.exe --device <serial> --patch-install   use that headset, n
 ```
 
 Options: `--allow-unverified`, `--no-mods`, `--loader <path>`, `--mods keep|disable|delete`,
+`--data keep|backup-only|skip|clean` (game data on a signature-mismatch reinstall, below),
 `--non-interactive` (never confirms anything destructive), `--verbose`.
 
 ---
@@ -343,6 +347,9 @@ Options: `--allow-unverified`, `--no-mods`, `--loader <path>`, `--mods keep|disa
 | Unknown update ⇒ no auto patch | version profile + SHA-256 of libmain/libunity/libil2cpp/global-metadata → `KNOWN BUILD` / `UNKNOWN GAME UPDATE` |
 | One permanent signing key | `Keys/NCMK.keystore`, never regenerated automatically (back it up!) |
 | Signature mismatch | detected up front (installed signer hash from `dumpsys package`) and on `INSTALL_FAILED_UPDATE_INCOMPATIBLE` → *Cancel* / *Backup accessible data and reinstall* |
+| Game data mode | GUI *Game Data Mode* (saved in `%APPDATA%\NCMK\gui-settings.json`) / CLI `--data`: **Normal restore** (`keep`: back up, reinstall, restore) · **Backup only** (`backup-only`: back up, do not restore) · **Skip restore** (`skip`: no backup, no restore) · **Clean install** (`clean`: back up for safety, remove leftovers, fresh data). A failed restore never fails the install or blocks the launch; the backup stays in `Backups\UserData` |
+| Game data restore | only files verified during the backup are pushed; caches (`cache/`, `files/il2cpp/`, PSO cache) and NCMK binaries/logs are not restored; every file is checked by size and MD5 after backup and after restore |
+| Unpinned build | patching asks *Pin fingerprints and continue* (pins the verified original backup, then patches) |
 | No silent data loss | uninstall only after explicit confirmation; accessible data backed up to `Backups/<pkg>/userdata/<ts>/` and restored |
 | Mod files survive restore | `…/files/NCMKMods` → Keep / rename to `NCMKMods.disabled` / Delete (asked) |
 | Older kits | APKs patched by NightClubModKit (`libncsloader.so`, `libncsmod_*.so`) are detected and fully unpatched; `Keys/NightClubModKit.keystore` is migrated to `Keys/NCMK.keystore` (same key) |

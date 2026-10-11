@@ -27,7 +27,9 @@ public sealed class PatchOptions
     public string? TargetDevice { get; set; }
 }
 
-public sealed record PatchResult(bool Ok, string Message, string? OutputApk, IReadOnlyList<string> Splits, string? WorkspaceRoot = null)
+/// <param name="NeedsPin">The build's fingerprints are not pinned yet; pinning them from the verified backup lets the patch continue.</param>
+public sealed record PatchResult(bool Ok, string Message, string? OutputApk, IReadOnlyList<string> Splits, string? WorkspaceRoot = null,
+    bool NeedsPin = false)
 {
     public static PatchResult Fail(string msg, string? ws = null) => new(false, msg, null, Array.Empty<string>(), ws);
 }
@@ -80,7 +82,8 @@ public sealed class PatchEngine
         foreach (var d in compat.Details) _log.Info("  " + d);
         if (compat.Status == Compatibility.WrongPackage) return PatchResult.Fail(compat.Summary);
         if (!compat.AllowsAutomaticPatch && !options.AllowUnverified)
-            return PatchResult.Fail(compat.Summary + Environment.NewLine + "Automatic patching is disabled until compatibility is verified (use Advanced > Allow unverified build).");
+            return PatchResult.Fail(compat.Summary + Environment.NewLine + "Automatic patching is disabled until compatibility is verified " +
+                                    "(pin the fingerprints, or use Advanced > Allow unverified build).") with { NeedsPin = true };
 
         var loaderPath = options.LoaderPath ?? _paths.FindLoader();
         if (loaderPath == null || !File.Exists(loaderPath))

@@ -203,6 +203,105 @@ public class GameDataBackupTests
         Assert.Contains("/data/data", b.Describe());
     }
 
+    [Theory]
+    [InlineData("keep", GameDataMode.Keep)]
+    [InlineData("backup-only", GameDataMode.BackupOnly)]
+    [InlineData("Skip", GameDataMode.Skip)]
+    [InlineData("clean", GameDataMode.Clean)]
+    [InlineData("Normal restore", GameDataMode.Keep)]
+    [InlineData("Clean install", GameDataMode.Clean)]
+    public void Game_data_modes_parse(string text, GameDataMode expected)
+    {
+        Assert.True(GameDataModes.TryParse(text, out var m));
+        Assert.Equal(expected, m);
+        Assert.True(GameDataModes.TryParse(m.CliName(), out var back));
+        Assert.Equal(m, back);
+        Assert.Equal(m == GameDataMode.Keep, m.Restores());
+        Assert.Equal(m != GameDataMode.Skip, m.BacksUp());
+    }
+
+    [Fact]
+    public void Unknown_game_data_mode_is_rejected() => Assert.False(GameDataModes.TryParse("wipe", out _));
+
+    [Fact]
+    public void Md5_output_is_parsed()
+    {
+        var map = UserDataService.ParseMd5("d41d8cd98f00b204e9800998ecf8427e  ./files/a b.txt\r\nnot a line\n0cc175b9c0f1b6a831c399e269772661  ./files/x\n__NCMK_END__:0");
+        Assert.NotNull(map);
+        Assert.Equal(2, map!.Count);
+        Assert.Equal("d41d8cd98f00b204e9800998ecf8427e", map["files/a b.txt"]);
+        Assert.Null(UserDataService.ParseMd5("sh: md5sum: not found\n__NCMK_END__:127"));
+    }
+
+    [Theory]
+    [InlineData("files/save.dat", true)]
+    [InlineData("files/Unity/abc/Analytics/values", true)]
+    [InlineData("files/NCMKMods/Config/ncmk.debugoverlay.cfg", true)]
+    [InlineData("cache/UnityShaderCache/x.bin", false)]
+    [InlineData("files/il2cpp/Metadata/global-metadata.dat", false)]
+    [InlineData("files/NCMKMods/Mods/libncmkmod_old.so", false)]
+    [InlineData("files/NCMKMods/Logs/latest.log", false)]
+    [InlineData("files/NCMKMods/disable_mods", false)]
+    [InlineData("files/vulkan_pso_cache.bin", false)]
+    public void Caches_and_ncmk_binaries_are_never_restored(string path, bool restorable) =>
+        Assert.Equal(restorable, UserDataService.IsRestorable(path));
+
+    [Fact]
+    public void Restore_tar_uses_gnu_entries_under_the_package_folder()
+    {
+        using var tmp = new TempDir();
+        var local = tmp.File(Path.Combine("data", GameConstants.PackageName));
+        Directory.CreateDirectory(Path.Combine(local, "files", "sub"));
+        File.WriteAllText(Path.Combine(local, "files", "sub", "a.txt"), "hello");
+        var report = new FolderBackupReport { Label = "Android/data", RemotePath = Data, LocalPath = local };
+        var tar = tmp.File("r.tar");
+        UserDataService.WriteRestoreTar(tar, report, GameConstants.PackageName, new[] { new RemoteFile("files/sub/a.txt", 5) });
+        using var fs = File.OpenRead(tar);
+        using var reader = new TarReader(fs);
+        var names = new List<string>();
+        while (reader.GetNextEntry() is { } e)
+        {
+            Assert.Equal(TarEntryFormat.Gnu, e.Format);
+            names.Add(e.Name);
+        }
+        Assert.Equal(new[] { GameConstants.PackageName + "/files/", GameConstants.PackageName + "/files/sub/", GameConstants.PackageName + "/files/sub/a.txt" }, names);
+    }
+
+    [Fact]
+    public void Restore_skips_caches_and_never_pushes_a_partial_file()
+    {
+        if (!CanRunFakeAdb) return;
+        using var q = new FakeQuest();
+        var pkgDir = Path.Combine(q.Root, "sdcard", "Android", "data", GameConstants.PackageName);
+        Directory.CreateDirectory(Path.Combine(pkgDir, "files", "il2cpp"));
+        File.WriteAllText(Path.Combine(pkgDir, "files", "il2cpp", "cache.dat"), "stale build cache");
+        var b = q.RunBackup();
+        Assert.True(b.ExternalData.Complete, b.ExternalData.Summary);
+        Assert.True(b.ExternalData.ContentVerified);
+
+        // A leftover partial file in the backup folder (e.g. from an interrupted pull) must not reach the headset.
+        File.WriteAllText(Path.Combine(b.ExternalData.LocalPath, "files", "partial.tmp"), "half");
+        Directory.Delete(pkgDir, true);
+        Directory.Delete(Path.Combine(q.Root, "sdcard", "Android", "obb", GameConstants.PackageName), true);
+
+        Assert.True(q.Service!.Restore(q.Adb!, b));
+        Assert.True(File.Exists(Path.Combine(pkgDir, "files", "save.dat")));
+        Assert.False(File.Exists(Path.Combine(pkgDir, "files", "partial.tmp")));
+        Assert.False(Directory.Exists(Path.Combine(pkgDir, "files", "il2cpp")));
+        Assert.False(Directory.Exists(Path.Combine(pkgDir, GameConstants.PackageName)));   // no nested <pkg>/<pkg>
+        Assert.Empty(Directory.GetDirectories(Path.GetDirectoryName(b.ExternalData.LocalPath)!, ".restore-*"));
+    }
+
+    [Fact]
+    public void Restore_reports_a_file_whose_backup_copy_changed()
+    {
+        if (!CanRunFakeAdb) return;
+        using var q = new FakeQuest();
+        var b = q.RunBackup();
+        File.WriteAllText(Path.Combine(b.ExternalData.LocalPath, "files", "settings.cfg"), "corrupted!!");  // size changed
+        Assert.False(q.Service!.Restore(q.Adb!, b));
+    }
+
     [Fact]
     public void Restore_puts_every_saved_file_back_and_verifies_it()
     {

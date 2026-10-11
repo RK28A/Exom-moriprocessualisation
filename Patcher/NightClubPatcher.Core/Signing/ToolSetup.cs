@@ -74,7 +74,7 @@ public sealed class ToolSetup
         if (http == null) _http.DefaultRequestHeaders.UserAgent.ParseAdd("NCMK/0.4");
     }
 
-    public string ManifestPath => Path.Combine(_paths.Tools, "tools.json");
+    public string ManifestPath => Path.Combine(_tools.InstallRoot, "tools.json");
     public ToolsManifest Manifest => ToolsManifest.Load(ManifestPath);
 
     public static string HostOs =>
@@ -143,7 +143,8 @@ public sealed class ToolSetup
                     var za = _tools.FindZipalign();
                     var jar = _tools.FindApksignerJar();
                     if (za == null || jar == null) return Missing(id, za == null ? "zipalign missing" : "apksigner.jar missing");
-                    var v = _tools.IsBundled(za) ? manifest.Version(Key(id)) : Path.GetFileName(Path.GetDirectoryName(za));
+                    var root = _tools.RootOf(za);
+                    var v = root != null ? ToolsManifest.Load(Path.Combine(root, "tools.json")).Version(Key(id)) : Path.GetFileName(Path.GetDirectoryName(za));
                     return Ready(id, v, za);
                 }
                 case ToolId.Jdk:
@@ -202,7 +203,7 @@ public sealed class ToolSetup
             ToolId.Ninja => "<1 MB",
             _ => "",
         };
-        return "The following tools will be downloaded into " + _paths.Tools + ":" + Environment.NewLine +
+        return "The following tools will be downloaded into " + _tools.InstallRoot + " (shared by every NCMK copy on this PC):" + Environment.NewLine +
                string.Join(Environment.NewLine, toInstall.Select(t => $" - {Name(t)} ({Size(t)})")) + Environment.NewLine + Environment.NewLine +
                "Nothing is installed system-wide and your PATH is not changed." + Environment.NewLine +
                "Sources: Android SDK tools and the NDK from dl.google.com (by downloading them you accept the Android SDK " +
@@ -292,7 +293,7 @@ public sealed class ToolSetup
         _log.Step("Downloading ADB (platform-tools)");
         var file = await DownloadAsync(a.Url, ct);
         var sha256 = Verify(file, a.Sha1, null);
-        InstallFromArchive(file, Path.Combine(_paths.Tools, "adb"), stripTopFolder: true);
+        InstallFromArchive(file, Path.Combine(_tools.InstallRoot, "adb"), stripTopFolder: true);
         Manifest.Set(Key(ToolId.Adb), a.Revision.ToString(3), Details(a.Url, sha256, "SHA-1 from Google SDK repository"));
     }
 
@@ -316,8 +317,8 @@ public sealed class ToolSetup
             foreach (var dll in Directory.EnumerateFiles(staging, "*.dll")) File.Copy(dll, Path.Combine(za, Path.GetFileName(dll)));
             File.Copy(Path.Combine(staging, "lib", "apksigner.jar"), Path.Combine(asg, "apksigner.jar"));
             MakeExecutable(Path.Combine(za, exe));
-            SwapInto(za, Path.Combine(_paths.Tools, "zipalign"));
-            SwapInto(asg, Path.Combine(_paths.Tools, "apksigner"));
+            SwapInto(za, Path.Combine(_tools.InstallRoot, "zipalign"));
+            SwapInto(asg, Path.Combine(_tools.InstallRoot, "apksigner"));
         }
         finally
         {
@@ -336,8 +337,8 @@ public sealed class ToolSetup
         var expected = (await _http.GetStringAsync(url + ".sha256sum.txt", ct)).Split(' ', '\t', '\n')[0].Trim();
         var file = await DownloadAsync(url, ct);
         var sha256 = Verify(file, null, expected);
-        InstallFromArchive(file, Path.Combine(_paths.Tools, "jdk"), stripTopFolder: true);
-        var java = Path.Combine(_paths.Tools, "jdk", "bin", "java.exe");
+        InstallFromArchive(file, Path.Combine(_tools.InstallRoot, "jdk"), stripTopFolder: true);
+        var java = Path.Combine(_tools.InstallRoot, "jdk", "bin", "java.exe");
         var r = ProcessRunner.Run(java, new[] { "-version" }, TimeSpan.FromSeconds(30));
         var v = Regex.Match(r.StdErr + r.StdOut, "version \"([^\"]+)\"").Groups[1].Value;
         Manifest.Set(Key(ToolId.Jdk), Nz(v) ?? "17", Details(url, sha256, "SHA-256 published by Microsoft"));
@@ -485,7 +486,7 @@ public sealed class ToolSetup
     private string Extract(string archive, string name, bool stripTopFolder)
     {
         _log.Step("Extracting");
-        var staging = Path.Combine(_paths.Tools, ".staging", name);
+        var staging = Path.Combine(_tools.InstallRoot, ".staging", name);
         TryDelete(staging);
         ExtractArchive(archive, staging, stripTopFolder);
         TryDelete(archive);

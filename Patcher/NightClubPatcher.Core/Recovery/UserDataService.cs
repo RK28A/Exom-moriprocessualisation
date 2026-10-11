@@ -1,4 +1,5 @@
 using System.Formats.Tar;
+using System.Security.Cryptography;
 using System.Text;
 using NightClubPatcher.Core.Adb;
 using NightClubPatcher.Core.Infrastructure;
@@ -23,6 +24,9 @@ public sealed class FolderBackupReport
     public List<string> Attempts { get; } = new();         // "adb pull: 3/12 files" ...
     public string? Method { get; set; }
 
+    /// <summary>True: every saved file's MD5 matches the headset; false: MD5 could not be checked (sizes only).</summary>
+    public bool ContentVerified { get; set; }
+
     /// <summary>Files present in the local copy (useful when the device folder could not be listed).</summary>
     public int LocalFileCount { get; set; }
 
@@ -38,7 +42,7 @@ public sealed class FolderBackupReport
             if (!Exists) return $"{Label}: folder does not exist on the headset (nothing to lose).";
             if (Inventory.Count == 0 && InventoryComplete) return $"{Label}: folder is empty (nothing to lose).";
             var head = $"{Label}: {Saved.Count}/{Inventory.Count} files saved ({FormatSize(TotalBytes)})";
-            if (Complete) return head + $" - complete, verified (method: {Method}).";
+            if (Complete) return head + $" - complete, verified ({(ContentVerified ? "size + MD5" : "size")}, method: {Method}).";
             var sb = new StringBuilder(head + " - INCOMPLETE.");
             if (!InventoryComplete)
                 sb.Append(" The folder could not be fully listed (" + string.Join("; ", InventoryErrors.Take(3)) +
@@ -263,7 +267,81 @@ public sealed class UserDataService
                 if (report.InventoryComplete) break;
             }
         }
+        if (report.Saved.Count > 0) VerifyBackupContent(adb, report);
         return report;
+    }
+
+    /// <summary>
+    /// Compares the MD5 of every saved file with the headset. A size match alone does not prove the
+    /// copy is right (e.g. two names that differ only by case collapse into one file on Windows).
+    /// Mismatching files are pulled again one by one; whatever still differs is reported as missing.
+    /// </summary>
+    private void VerifyBackupContent(AdbClient adb, FolderBackupReport report)
+    {
+        var remote = RemoteMd5(adb, report.RemotePath);
+        if (remote == null)
+        {
+            _log.Warn($"  {report.Label}: md5sum is not available on the headset; files were checked by size only.");
+            return;
+        }
+        List<string> Bad() => report.Saved.Where(rel =>
+            !remote.TryGetValue(rel, out var h) || !string.Equals(h, LocalMd5(LocalFile(report, rel)), StringComparison.OrdinalIgnoreCase)).ToList();
+        var bad = Bad();
+        if (bad.Count > 0)
+        {
+            _log.Warn($"  {report.Label}: {bad.Count} file(s) differ from the headset (MD5), pulling them again");
+            foreach (var rel in bad)
+            {
+                var local = LocalFile(report, rel);
+                try { File.Delete(local); } catch { /* re-pulled below */ }
+                adb.Pull($"{report.RemotePath}/{rel}", local, TimeSpan.FromMinutes(30));
+            }
+            VerifyLocal(report);
+            bad = Bad();
+        }
+        foreach (var rel in bad)
+        {
+            report.Saved.Remove(rel);
+            report.Missing.Add(rel + " (content differs from the headset)");
+        }
+        report.ContentVerified = bad.Count == 0;
+        _log.Info(bad.Count == 0
+            ? $"  {report.Label}: {report.Saved.Count} files verified by MD5."
+            : $"  {report.Label}: {bad.Count} file(s) could not be copied identically.");
+    }
+
+    private static string LocalFile(FolderBackupReport report, string rel) =>
+        Path.Combine(report.LocalPath, rel.Replace('/', Path.DirectorySeparatorChar));
+
+    public static string? LocalMd5(string path)
+    {
+        if (!File.Exists(path)) return null;
+        using var fs = File.OpenRead(path);
+        return Convert.ToHexString(MD5.HashData(fs)).ToLowerInvariant();
+    }
+
+    /// <summary>"relative path -> md5" for every file under a device folder; null when md5sum is unavailable.</summary>
+    public static Dictionary<string, string>? RemoteMd5(AdbClient adb, string remote)
+    {
+        var r = adb.Shell($"cd \"{remote}\" && find . -type f -exec md5sum {{}} + ; echo __NCMK_END__:$?", TimeSpan.FromMinutes(30));
+        return ParseMd5(r.StdOut);
+    }
+
+    /// <summary>Parses md5sum lines ("hash  ./path"); null when no line could be parsed.</summary>
+    public static Dictionary<string, string>? ParseMd5(string output)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.Length < 35 || line[32] != ' ') continue;
+            var hash = line[..32];
+            if (!hash.All(Uri.IsHexDigit)) continue;
+            var path = line[33..].TrimStart(' ', '*');
+            if (path.StartsWith("./", StringComparison.Ordinal)) path = path[2..];
+            if (path.Length > 0) map[path] = hash.ToLowerInvariant();
+        }
+        return map.Count == 0 ? null : map;
     }
 
     private bool TarStream(AdbClient adb, string parent, string pkg, string localParent)
@@ -368,14 +446,48 @@ public sealed class UserDataService
 
     // ------------------------------------------------------------------ restore
 
+    /// <summary>
+    /// Paths under Android/data/&lt;pkg&gt; that are never restored: caches the game and Unity rebuild on
+    /// first launch (restoring a cache made by another build can crash the game), and NCMK's own
+    /// binaries, logs and safe-mode flag (the patcher pushes the current ones).
+    /// </summary>
+    public static readonly string[] NotRestoredPrefixes =
+    {
+        "cache/",
+        "code_cache/",
+        "files/il2cpp/",
+        "files/UnityCache/",
+        "files/NCMKMods/Mods/",
+        "files/NCMKMods/Logs/",
+        "files/NCMKMods/disable_mods",
+        "files/NightClubMods/",
+    };
+
+    public static bool IsRestorable(string relativePath) =>
+        !NotRestoredPrefixes.Any(p => relativePath.StartsWith(p, StringComparison.OrdinalIgnoreCase)) &&
+        !relativePath.EndsWith("pso_cache.bin", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Puts the verified files of a backup back on the headset and checks them (size + MD5).
+    /// Only files whose copy was verified during the backup are pushed: partial or unverified files
+    /// never reach the headset. Never throws; returns false when something could not be restored.
+    /// </summary>
     public bool Restore(AdbClient adb, UserDataBackup backup)
     {
         var ok = true;
         _log.Step("Restoring game data");
-        foreach (var (report, parent) in new[] { (backup.ExternalData, "/sdcard/Android/data"), (backup.Obb, "/sdcard/Android/obb") })
+        foreach (var (report, parent, isData) in new[] { (backup.ExternalData, "/sdcard/Android/data", true), (backup.Obb, "/sdcard/Android/obb", false) })
         {
             if (report.Saved.Count == 0 || !Directory.Exists(report.LocalPath)) continue;
-            ok &= RestoreFolder(adb, report, parent);
+            try
+            {
+                ok &= RestoreFolder(adb, report, parent, isData);
+            }
+            catch (Exception ex)
+            {
+                ok = false;
+                _log.Error($"  {report.Label}: restore failed: {ex.Message}");
+            }
         }
         if (backup.HasInternalData)
             _log.Warn("Internal data was backed up to internal.tar but is not restored automatically (requires a debuggable build).");
@@ -384,39 +496,116 @@ public sealed class UserDataService
         return ok;
     }
 
-    private bool RestoreFolder(AdbClient adb, FolderBackupReport report, string parent)
+    private bool RestoreFolder(AdbClient adb, FolderBackupReport report, string parent, bool applyExclusions)
     {
-        adb.Shell($"mkdir -p \"{parent}\"");
-        adb.Push(report.LocalPath, parent + "/", TimeSpan.FromHours(1));
-        if (RemoteMatches(adb, report)) return true;
+        var pkg = Path.GetFileName(report.LocalPath);
+        var files = report.Inventory
+            .Where(f => report.Saved.Contains(f.RelativePath) && (!applyExclusions || IsRestorable(f.RelativePath)))
+            .ToList();
+        var skipped = report.Saved.Count - files.Count;
+        if (skipped > 0) _log.Info($"  {report.Label}: {skipped} cache / NCMK file(s) not restored (rebuilt by the game and the patcher).");
 
-        // Fallback: push a tar to /data/local/tmp and extract it on the device.
-        _log.Warn($"  {report.Label}: adb push incomplete, trying a tar upload");
-        var tar = Path.Combine(Path.GetTempPath(), $"ncmk-restore-{Guid.NewGuid():N}.tar");
+        // The local copy must still be exactly what was verified.
+        var ok = true;
+        foreach (var f in files.ToList())
+        {
+            var fi = new FileInfo(LocalFile(report, f.RelativePath));
+            if (fi.Exists && fi.Length == f.Size) continue;
+            _log.Warn($"  {report.Label}: local copy of {f.RelativePath} changed since the backup; not restored.");
+            files.Remove(f);
+            ok = false;
+        }
+        if (files.Count == 0) return ok;
+
+        // Push a folder that holds exactly the files to restore (no partial leftovers, no caches).
+        var wanted = new HashSet<string>(files.Select(f => f.RelativePath), StringComparer.Ordinal);
+        var present = Directory.EnumerateFiles(report.LocalPath, "*", SearchOption.AllDirectories)
+            .Select(p => Path.GetRelativePath(report.LocalPath, p).Replace(Path.DirectorySeparatorChar, '/')).ToHashSet(StringComparer.Ordinal);
+        string? staging = null;
+        var source = report.LocalPath;
+        if (!present.SetEquals(wanted))
+        {
+            staging = Path.Combine(Path.GetDirectoryName(report.LocalPath)!, ".restore-" + Guid.NewGuid().ToString("N")[..8]);
+            source = Path.Combine(staging, pkg);
+            foreach (var f in files)
+            {
+                var dst = Path.Combine(source, f.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+                File.Copy(LocalFile(report, f.RelativePath), dst);
+            }
+        }
+
         try
         {
-            TarFile.CreateFromDirectory(report.LocalPath, tar, includeBaseDirectory: true);
-            var remoteTar = $"/data/local/tmp/{Path.GetFileName(tar)}";
-            if (adb.Push(tar, remoteTar))
+            adb.Shell($"mkdir -p \"{parent}\"");
+            adb.Push(source, parent + "/", TimeSpan.FromHours(1));
+            if (RemoteMatches(adb, report, files)) return ok;
+
+            // Fallback: upload a tar (GNU format, no pax headers: toybox extracts it as-is) and extract it on the device.
+            _log.Warn($"  {report.Label}: adb push incomplete, trying a tar upload");
+            var tar = Path.Combine(Path.GetTempPath(), $"ncmk-restore-{Guid.NewGuid():N}.tar");
+            try
             {
-                adb.Shell($"tar -xf \"{remoteTar}\" -C \"{parent}\"; rm -f \"{remoteTar}\"", TimeSpan.FromHours(1));
+                WriteRestoreTar(tar, report, pkg, files);
+                var remoteTar = $"/data/local/tmp/{Path.GetFileName(tar)}";
+                if (adb.Push(tar, remoteTar))
+                    adb.Shell($"tar -xf \"{remoteTar}\" -C \"{parent}\"; rm -f \"{remoteTar}\"", TimeSpan.FromHours(1));
             }
+            finally
+            {
+                try { File.Delete(tar); } catch { /* ignore */ }
+            }
+            return RemoteMatches(adb, report, files) && ok;
         }
         finally
         {
-            try { File.Delete(tar); } catch { /* ignore */ }
+            if (staging != null) try { Directory.Delete(staging, true); } catch { /* ignore */ }
         }
-        return RemoteMatches(adb, report);
     }
 
-    private bool RemoteMatches(AdbClient adb, FolderBackupReport report)
+    /// <summary>Tar of the given files under "&lt;pkg&gt;/", GNU format, regular files and folders only.</summary>
+    public static void WriteRestoreTar(string tarPath, FolderBackupReport report, string pkg, IEnumerable<RemoteFile> files)
+    {
+        using var fs = File.Create(tarPath);
+        using var w = new TarWriter(fs, TarEntryFormat.Gnu, leaveOpen: false);
+        var dirs = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var f in files)
+        {
+            var parts = f.RelativePath.Split('/');
+            for (var i = 1; i < parts.Length; i++)
+            {
+                var d = pkg + "/" + string.Join('/', parts.Take(i)) + "/";
+                if (dirs.Add(d)) w.WriteEntry(new GnuTarEntry(TarEntryType.Directory, d) { Mode = (UnixFileMode)0b111_111_101 });
+            }
+            var entry = new GnuTarEntry(TarEntryType.RegularFile, pkg + "/" + f.RelativePath)
+            {
+                Mode = (UnixFileMode)0b110_110_100,
+                DataStream = File.OpenRead(LocalFile(report, f.RelativePath)),
+            };
+            using (entry.DataStream) w.WriteEntry(entry);
+        }
+    }
+
+    /// <summary>Every restored file is on the headset with the right size and (when md5sum exists) the same MD5.</summary>
+    private bool RemoteMatches(AdbClient adb, FolderBackupReport report, IReadOnlyList<RemoteFile> files)
     {
         var now = Inventory(adb, report.Label, report.RemotePath, Path.GetTempPath());
         var onDevice = now.Inventory.ToDictionary(f => f.RelativePath, f => f.Size, StringComparer.Ordinal);
-        var missing = report.Inventory.Where(f => report.Saved.Contains(f.RelativePath))
-            .Where(f => !onDevice.TryGetValue(f.RelativePath, out var size) || size != f.Size).Select(f => f.RelativePath).ToList();
-        if (missing.Count == 0) _log.Info($"  {report.Label}: {report.Saved.Count} files restored and verified.");
-        else foreach (var m in missing.Take(10)) _log.Warn($"  {report.Label}: not restored: {m}");
-        return missing.Count == 0;
+        var bad = files.Where(f => !onDevice.TryGetValue(f.RelativePath, out var size) || size != f.Size).Select(f => f.RelativePath).ToList();
+        var md5Checked = false;
+        if (bad.Count == 0)
+        {
+            var remote = RemoteMd5(adb, report.RemotePath);
+            if (remote != null)
+            {
+                md5Checked = true;
+                bad = files.Where(f => !remote.TryGetValue(f.RelativePath, out var h) ||
+                                       !string.Equals(h, LocalMd5(LocalFile(report, f.RelativePath)), StringComparison.OrdinalIgnoreCase))
+                    .Select(f => f.RelativePath + " (content differs)").ToList();
+            }
+        }
+        if (bad.Count == 0) _log.Info($"  {report.Label}: {files.Count} files restored and verified ({(md5Checked ? "size + MD5" : "size")}).");
+        else foreach (var m in bad.Take(10)) _log.Warn($"  {report.Label}: not restored: {m}");
+        return bad.Count == 0;
     }
 }
