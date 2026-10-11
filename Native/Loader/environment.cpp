@@ -67,6 +67,60 @@ bool ReadBool(const std::string& json, const std::string& key, bool def, size_t 
     if (json.compare(v, 5, "false") == 0) return false;
     return def;
 }
+
+int ReadInt(const std::string& json, const std::string& key, int def, size_t from = 0) {
+    size_t v = FindValue(json, key, from);
+    if (v == std::string::npos) return def;
+    char* end = nullptr;
+    long n = strtol(json.c_str() + v, &end, 10);
+    return end == json.c_str() + v ? def : static_cast<int>(n);
+}
+
+struct ZipEntry {
+    std::string name;
+    uint16_t method = 0;
+    uint32_t compressedSize = 0;
+    uint32_t localOffset = 0;
+};
+
+// Central directory of a ZIP/APK (no ZIP64; the patcher refuses ZIP64 APKs anyway).
+std::vector<ZipEntry> ReadCentralDirectory(FILE* f) {
+    std::vector<ZipEntry> out;
+    auto rd16 = [](const unsigned char* p) { return static_cast<uint32_t>(p[0] | (p[1] << 8)); };
+    auto rd32 = [](const unsigned char* p) {
+        return static_cast<uint32_t>(p[0] | (p[1] << 8) | (p[2] << 16) | (static_cast<uint32_t>(p[3]) << 24));
+    };
+    fseeko(f, 0, SEEK_END);
+    off_t size = ftello(f);
+    off_t tail = std::min<off_t>(size, 65557);
+    std::vector<unsigned char> buf(static_cast<size_t>(tail));
+    fseeko(f, size - tail, SEEK_SET);
+    if (fread(buf.data(), 1, buf.size(), f) != buf.size()) return out;
+    for (off_t i = tail - 22; i >= 0; --i) {
+        const unsigned char* e = buf.data() + i;
+        if (rd32(e) != 0x06054b50) continue;
+        uint32_t count = rd16(e + 10), cdSize = rd32(e + 12), cdOff = rd32(e + 16);
+        std::vector<unsigned char> cd(cdSize);
+        fseeko(f, cdOff, SEEK_SET);
+        if (fread(cd.data(), 1, cd.size(), f) != cd.size()) break;
+        size_t p = 0;
+        for (uint32_t k = 0; k < count && p + 46 <= cd.size(); ++k) {
+            const unsigned char* h = cd.data() + p;
+            if (rd32(h) != 0x02014b50) break;
+            uint32_t nl = rd16(h + 28), xl = rd16(h + 30), cl = rd16(h + 32);
+            if (p + 46 + nl > cd.size()) break;
+            ZipEntry z;
+            z.name.assign(reinterpret_cast<const char*>(h + 46), nl);
+            z.method = static_cast<uint16_t>(rd16(h + 10));
+            z.compressedSize = rd32(h + 20);
+            z.localOffset = rd32(h + 42);
+            out.push_back(std::move(z));
+            p += 46 + nl + xl + cl;
+        }
+        break;
+    }
+    return out;
+}
 }  // namespace
 
 namespace {
@@ -190,8 +244,51 @@ std::string ResolveModsRoot(const std::string& package) {
     return {};
 }
 
-LoaderConfig LoadConfig(const std::string& modsRoot) {
-    LoaderConfig cfg;
+void ApplyLoaderJson(LoaderConfig& cfg, const std::string& json) {
+    size_t loader = json.find("\"loader\"");
+    size_t from = loader == std::string::npos ? 0 : loader;
+    cfg.logging = ReadBool(json, "logging", cfg.logging, from);
+    cfg.safeMode = ReadBool(json, "safeMode", cfg.safeMode, from);
+    cfg.sceneLoaderDiagnostics = ReadBool(json, "sceneLoaderDiagnostics", cfg.sceneLoaderDiagnostics, from);
+    cfg.sceneLoaderRecovery = ReadBool(json, "sceneLoaderRecovery", cfg.sceneLoaderRecovery, from);
+    cfg.sceneLoaderRecoveryScene = ReadInt(json, "sceneLoaderRecoveryScene", cfg.sceneLoaderRecoveryScene, from);
+    cfg.sceneLoaderRecoveryDelay = ReadInt(json, "sceneLoaderRecoveryDelaySeconds", cfg.sceneLoaderRecoveryDelay, from);
+    cfg.metaPlatformDiagnostics = ReadBool(json, "metaPlatformDiagnostics", cfg.metaPlatformDiagnostics, from);
+    cfg.storageDiagnostics = ReadBool(json, "storageDiagnostics", cfg.storageDiagnostics, from);
+}
+
+std::string ApkPathFromLibrary(const std::string& libPath) {
+    size_t bang = libPath.find("!/");
+    if (bang != std::string::npos) return libPath.substr(0, bang);
+    size_t lib = libPath.rfind("/lib/");
+    return lib == std::string::npos ? std::string() : libPath.substr(0, lib) + "/base.apk";
+}
+
+bool LoadEmbeddedConfig(LoaderConfig& cfg, const std::string& apkPath) {
+    if (apkPath.empty()) return false;
+    FILE* f = fopen(apkPath.c_str(), "rb");
+    if (!f) return false;
+    bool ok = false;
+    for (const auto& e : ReadCentralDirectory(f)) {
+        if (e.name != "assets/NCMK/loader.json") continue;
+        if (e.method != 0 || e.compressedSize == 0 || e.compressedSize > 65536) break;  // the patcher writes it STORED
+        unsigned char lh[30];
+        fseeko(f, e.localOffset, SEEK_SET);
+        if (fread(lh, 1, 30, f) != 30 || lh[0] != 'P' || lh[1] != 'K') break;
+        uint32_t nl = static_cast<uint32_t>(lh[26] | (lh[27] << 8)), xl = static_cast<uint32_t>(lh[28] | (lh[29] << 8));
+        std::string json(e.compressedSize, '\0');
+        fseeko(f, static_cast<off_t>(e.localOffset) + 30 + nl + xl, SEEK_SET);
+        if (fread(&json[0], 1, json.size(), f) != json.size()) break;
+        ApplyLoaderJson(cfg, json);
+        cfg.source = "APK assets/NCMK/loader.json";
+        ok = true;
+        break;
+    }
+    fclose(f);
+    return ok;
+}
+
+LoaderConfig LoadConfig(const std::string& modsRoot, LoaderConfig cfg) {
     if (modsRoot.empty()) return cfg;
     std::string path = modsRoot + "/Config/config.json";
     std::string json = ReadFile(path);
@@ -203,10 +300,8 @@ LoaderConfig LoadConfig(const std::string& modsRoot) {
         }
         return cfg;
     }
-    size_t loader = json.find("\"loader\"");
-    size_t from = loader == std::string::npos ? 0 : loader;
-    cfg.logging = ReadBool(json, "logging", true, from);
-    cfg.safeMode = ReadBool(json, "safeMode", false, from);
+    ApplyLoaderJson(cfg, json);
+    cfg.source = (cfg.source == "defaults" ? std::string() : cfg.source + " + ") + path;
 
     size_t mods = FindValue(json, "mods");
     if (mods != std::string::npos && json[mods] == '{') {
@@ -246,40 +341,11 @@ std::vector<std::string> ListEmbeddedMods(const std::string& apkPath) {
     std::vector<std::string> out;
     FILE* f = fopen(apkPath.c_str(), "rb");
     if (!f) return out;
-    auto rd16 = [](const unsigned char* p) { return static_cast<uint32_t>(p[0] | (p[1] << 8)); };
-    auto rd32 = [](const unsigned char* p) {
-        return static_cast<uint32_t>(p[0] | (p[1] << 8) | (p[2] << 16) | (static_cast<uint32_t>(p[3]) << 24));
-    };
-
-    fseeko(f, 0, SEEK_END);
-    off_t size = ftello(f);
-    off_t tail = std::min<off_t>(size, 65557);
-    std::vector<unsigned char> buf(static_cast<size_t>(tail));
-    fseeko(f, size - tail, SEEK_SET);
-    if (fread(buf.data(), 1, buf.size(), f) != buf.size()) { fclose(f); return out; }
-
-    for (off_t i = tail - 22; i >= 0; --i) {
-        const unsigned char* e = buf.data() + i;
-        if (rd32(e) != 0x06054b50) continue;
-        uint32_t count = rd16(e + 10), cdSize = rd32(e + 12), cdOff = rd32(e + 16);
-        std::vector<unsigned char> cd(cdSize);
-        fseeko(f, cdOff, SEEK_SET);
-        if (fread(cd.data(), 1, cd.size(), f) != cd.size()) break;
-        size_t p = 0;
-        const std::string prefix = "lib/arm64-v8a/";
-        for (uint32_t k = 0; k < count && p + 46 <= cd.size(); ++k) {
-            const unsigned char* h = cd.data() + p;
-            if (rd32(h) != 0x02014b50) break;
-            uint32_t nl = rd16(h + 28), xl = rd16(h + 30), cl = rd16(h + 32);
-            if (p + 46 + nl > cd.size()) break;
-            std::string name(reinterpret_cast<const char*>(h + 46), nl);
-            if (StartsWith(name, prefix.c_str())) {
-                std::string file = name.substr(prefix.size());
-                if (file.find('/') == std::string::npos && IsModName(file)) out.push_back(file);
-            }
-            p += 46 + nl + xl + cl;
-        }
-        break;
+    const std::string prefix = "lib/arm64-v8a/";
+    for (const auto& e : ReadCentralDirectory(f)) {
+        if (!StartsWith(e.name, prefix.c_str())) continue;
+        std::string file = e.name.substr(prefix.size());
+        if (file.find('/') == std::string::npos && IsModName(file)) out.push_back(file);
     }
     fclose(f);
     std::sort(out.begin(), out.end());

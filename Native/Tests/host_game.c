@@ -64,6 +64,10 @@ int main(void) {
 
     fprintf(stderr, "[host_game] after shutdown: original slots ExecuteTasks=%d EventSystem=%d OVRManager=%d\n",
             slots_original(0), slots_original(1), slots_original(2));
+    long (*awake_calls)(void) = (long (*)(void))dlsym(il2cpp, "fake_sloader_awake_calls");
+    int (*awake_original)(void) = (int (*)(void))dlsym(il2cpp, "fake_sloader_awake_slots_original");
+    fprintf(stderr, "[host_game] bl_SceneLoader.Awake ran %ld time(s), slots restored: %s\n", awake_calls(),
+            awake_original() ? "yes" : "no");
     /* The engine keeps running after unload: calls must reach the originals directly. */
     long before = original_calls(1);
     run_frame(targets);

@@ -657,6 +657,15 @@ public sealed class ModKitService
                     _ => "unknown (native libs not extracted / not readable)",
                 });
             }
+            // Game content outside the APK (Unity "split application binary" / Meta asset files). Unity logs
+            // "Skipping OBB loading" when it cannot read it; Resources and later scenes are then missing.
+            var obb = Adb.Shell($"ls -la \"{GameConstants.DeviceObbDir}\" 2>&1").StdOut.Trim();
+            var obbMissing = obb.Contains("No such file") || obb.Length == 0;
+            r.Add("OBB folder", obbMissing ? CheckStatus.Warn : CheckStatus.Info,
+                obbMissing ? GameConstants.DeviceObbDir + " does not exist (if the store build uses an OBB, the game cannot load its content)"
+                           : GameConstants.DeviceObbDir + Environment.NewLine + obb);
+            var perms = Adb.Shell($"dumpsys package {GameConstants.PackageName} | grep -E 'EXTERNAL_STORAGE|MANAGE_EXTERNAL'").StdOut.Trim();
+            r.Add("Storage permissions", CheckStatus.Info, perms.Length == 0 ? "none requested/granted" : perms);
             r.Add("Mod folder", CheckStatus.Info, Adb.RemoteExists(GameConstants.DeviceModsRoot) ? GameConstants.DeviceModsRoot : "absent");
             r.Add("Safe mode flag", CheckStatus.Info, Adb.RemoteExists(GameConstants.DeviceSafeModeFlag) ? "ON" : "off");
             r.LoaderLog.AddRange(Logcat.LoaderLog(Adb));

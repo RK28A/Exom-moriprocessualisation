@@ -24,6 +24,8 @@ public partial class AdvancedWindow : Window
         _svc = main.Service;
         AllowUnverified.IsChecked = main.AllowUnverified;
         EmbedMods.IsChecked = main.EmbedMods;
+        SceneLoaderDiagnostics.IsChecked = main.SceneLoaderDiagnostics;
+        SceneLoaderRecovery.IsChecked = main.SceneLoaderRecovery;
         Loaded += (_, _) =>
         {
             var sb = new StringBuilder();
@@ -223,6 +225,8 @@ public partial class AdvancedWindow : Window
         if (_main == null) return;
         _main.AllowUnverified = AllowUnverified.IsChecked == true;
         _main.EmbedMods = EmbedMods.IsChecked == true;
+        _main.SceneLoaderDiagnostics = SceneLoaderDiagnostics.IsChecked == true;
+        _main.SceneLoaderRecovery = SceneLoaderRecovery.IsChecked == true;
     }
 
     private async void Pin_Click(object sender, RoutedEventArgs e) =>

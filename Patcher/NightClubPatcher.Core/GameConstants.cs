@@ -26,6 +26,8 @@ public static class GameConstants
     public const string LoaderEntry = LibDir + LoaderLibName;
     public const string ModLibPrefix = "libncmkmod_";
     public const string PatchMarkerEntry = "assets/NCMK/patch.json";
+    /// <summary>Loader settings defaults (diagnostics toggles), read by libncmkloader.so; written STORED.</summary>
+    public const string LoaderConfigEntry = "assets/NCMK/loader.json";
 
     // Names used by NightClubModKit (before the NCMK rename). Still detected and removed by Unpatch.
     public const string LegacyLoaderLibName = "libncsloader.so";

@@ -33,6 +33,9 @@
 #include <vector>
 
 #include "../../SDK/Core/ncmk_mod_api.h"
+#include "../Diagnostics/PlatformDiagnostics.h"
+#include "../Diagnostics/il2cpp_inspect.h"
+#include "../Diagnostics/SceneLoaderDiagnostics.h"
 #include "../Hooks/main_thread.h"
 #include "../Il2Cpp/il2cpp_api.h"
 #include "../Logging/ncmk_log.h"
@@ -221,8 +224,18 @@ void BuildHostApi() {
 }
 
 // Unity main thread, once per frame (called by the dispatcher).
+bool DiagnosticsWanted() {
+    const auto& c = G().config;
+    return c.sceneLoaderDiagnostics || c.sceneLoaderRecovery || c.metaPlatformDiagnostics;
+}
+
 void OnFrame(const ncmk::hooks::Frame& f) {
     if (g_stopping.load()) return;
+    if (DiagnosticsWanted()) {
+        ncmk::diag::SceneLoaderOnFrame(f.sceneLoaded, f.unscaledDeltaTime);
+        if (G().config.metaPlatformDiagnostics) ncmk::diag::MetaPlatformOnFrame(f.sceneLoaded, f.unscaledDeltaTime);
+    }
+    if (G().plugins.Mods().empty()) return;  // diagnostics only: nothing else runs per frame
     ncmk::input::PumpFrame();  // OVRInput.Update() when the game has no OVRManager
     G().plugins.FrameAll(f.deltaTime, f.fixedSteps, f.sceneLoaded);
 }
@@ -293,11 +306,13 @@ void* WorkerMain(void*) {
     G().selfPath = ncmk::SelfLibraryPath();
     NCMK_LOGI("[NCMK] Loader path: %s", G().selfPath.c_str());
 
+    // Settings: patcher defaults embedded in the APK, then NCMKMods/Config/config.json when readable.
+    ncmk::LoadEmbeddedConfig(G().config, ncmk::ApkPathFromLibrary(G().selfPath));
     G().modsRoot = ncmk::ResolveModsRoot(G().package);
     if (G().modsRoot.empty()) {
         NCMK_LOGW("[NCMK] No writable NCMKMods folder (storage permission?) - file logging and external mods disabled");
     } else {
-        G().config = ncmk::LoadConfig(G().modsRoot);
+        G().config = ncmk::LoadConfig(G().modsRoot, G().config);
         ncmk::log::SetFileEnabled(G().config.logging);
         if (G().config.logging && ncmk::log::OpenFile(G().modsRoot + "/Logs/latest.log"))
             NCMK_LOGI("[NCMK] Log file: %s", ncmk::log::FilePath().c_str());
@@ -305,6 +320,14 @@ void* WorkerMain(void*) {
     }
     G().safeMode = G().config.safeMode || ncmk::SafeModeFlagPresent(G().modsRoot);
     if (G().safeMode) NCMK_LOGW("[NCMK] SAFE MODE: no third-party mods will be loaded");
+    {
+        const auto& c = G().config;
+        NCMK_LOGI("[NCMK] Settings (%s): sceneLoaderDiagnostics=%d sceneLoaderRecovery=%d recoveryScene=%d recoveryDelay=%ds "
+                  "metaPlatformDiagnostics=%d storageDiagnostics=%d", c.source.c_str(), c.sceneLoaderDiagnostics,
+                  c.sceneLoaderRecovery, c.sceneLoaderRecoveryScene, c.sceneLoaderRecoveryDelay, c.metaPlatformDiagnostics,
+                  c.storageDiagnostics);
+        if (c.storageDiagnostics) ncmk::diag::StorageDiagnostics(G().package);
+    }
 
     if (!WaitFor([] { return LoadedLibrary("libunity.so") != nullptr; }, 120s, 50ms, "libunity.so")) return nullptr;
     Stage(3, "libunity detected");
@@ -364,12 +387,20 @@ void* WorkerMain(void*) {
     Stage(8, "Mods loaded");
     NCMK_LOGI("[NCMK] NCMK started successfully");
 
+    // Diagnostics (loader-internal, not mods): metadata dumps and Awake probes must be in place
+    // before the first scene's Awake() runs. Never in Safe Mode.
+    if (!G().safeMode && DiagnosticsWanted()) {
+        const auto& c = G().config;
+        ncmk::diag::SceneLoaderInit({c.sceneLoaderDiagnostics, c.sceneLoaderRecovery, c.sceneLoaderRecoveryScene, c.sceneLoaderRecoveryDelay});
+        if (c.metaPlatformDiagnostics) ncmk::diag::MetaPlatformInit();
+    }
+
     if (G().safeMode) {
         ncmk::hooks::Disable("Safe Mode");
         NCMK_LOGI("[NCMK] STAGE 09 Main-thread dispatcher: not installed (Safe Mode)");
         return nullptr;
     }
-    if (G().plugins.Mods().empty()) {
+    if (G().plugins.Mods().empty() && !DiagnosticsWanted()) {
         ncmk::hooks::Disable("no mods loaded");
         NCMK_LOGI("[NCMK] STAGE 09 Main-thread dispatcher: not installed (no mods loaded)");
         return nullptr;
@@ -404,6 +435,8 @@ extern "C" NCMK_EXPORT const NCMKHostApi* NCMK_GetHostApi(void) { return IL::IsR
 extern "C" NCMK_EXPORT void NCMK_Shutdown(void) {
     if (g_stopping.exchange(true)) return;
     ncmk::hooks::Restore();
+    ncmk::diag::SceneLoaderRestore();
+    ncmk::diag::MetaPlatformRestore();
     for (int i = 0; i < 50 && g_loopRunning.load(); ++i) std::this_thread::sleep_for(20ms);
     G().plugins.UnloadAll();
     NCMK_LOGI("[NCMK] Shutdown complete");
@@ -412,6 +445,7 @@ extern "C" NCMK_EXPORT void NCMK_Shutdown(void) {
 __attribute__((destructor)) static void loader_fini() {
     // Process exit or dlclose: never leave a MethodInfo pointing into an unmapped library.
     ncmk::hooks::Restore();
+    ncmk::diag::RestoreProbes();
 }
 
 __attribute__((constructor)) static void loader_init() {

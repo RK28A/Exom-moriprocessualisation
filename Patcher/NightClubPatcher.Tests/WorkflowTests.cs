@@ -165,7 +165,8 @@ public class WorkflowTests
 
         List<string> injected;
         using (var zip = new ZipArchiveReader(src))
-            (injected, _) = PatchEngine.BuildUnsignedPatchedApk(zip, original, Fixtures.LoaderStubArm64, new[] { modPath }, ws, new KitLog(null));
+            (injected, _) = PatchEngine.BuildUnsignedPatchedApk(zip, original, Fixtures.LoaderStubArm64, new[] { modPath }, ws, new KitLog(null),
+                Encoding.UTF8.GetBytes(new PatchOptions { SceneLoaderRecovery = true }.LoaderConfigJson()));
 
         Assert.Equal(before, File.ReadAllBytes(src)); // original never edited
         var patched = ApkInspector.Analyze(Path.Combine(ws.Patched, "unsigned.apk"));
@@ -192,6 +193,13 @@ public class WorkflowTests
                 Assert.True(e.IsStored, e.Name);
                 Assert.Equal(0, e.DataOffset % 4096);
             }
+            // Loader settings: STORED (the loader reads it without inflating), keys the loader parses.
+            var cfg = outZip.Find(GameConstants.LoaderConfigEntry);
+            Assert.NotNull(cfg);
+            Assert.True(cfg!.IsStored);
+            var json = Encoding.UTF8.GetString(outZip.ReadAllBytes(cfg));
+            Assert.Contains("\"sceneLoaderDiagnostics\": true", json);
+            Assert.Contains("\"sceneLoaderRecovery\": true", json);
         }
         Directory.Delete(ws.Root, true); // the reader is closed first: Windows refuses to delete open files
     }
