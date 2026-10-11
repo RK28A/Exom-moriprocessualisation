@@ -22,6 +22,12 @@ public sealed class FolderBackupReport
     public List<string> Saved { get; } = new();
     public List<string> Missing { get; } = new();
     public List<string> Attempts { get; } = new();         // "adb pull: 3/12 files" ...
+
+    /// <summary>Files the headset refuses to give to adb (Permission denied), relative paths.</summary>
+    public List<string> Unreadable { get; } = new();
+
+    /// <summary>Protected files that are not game data (crash dumps, caches, logs): left out of the backup.</summary>
+    public List<string> Skipped { get; } = new();
     public string? Method { get; set; }
 
     /// <summary>True: every saved file's MD5 matches the headset; false: MD5 could not be checked (sizes only).</summary>
@@ -42,8 +48,10 @@ public sealed class FolderBackupReport
             if (!Exists) return $"{Label}: folder does not exist on the headset (nothing to lose).";
             if (Inventory.Count == 0 && InventoryComplete) return $"{Label}: folder is empty (nothing to lose).";
             var head = $"{Label}: {Saved.Count}/{Inventory.Count} files saved ({FormatSize(TotalBytes)})";
-            if (Complete) return head + $" - complete, verified ({(ContentVerified ? "size + MD5" : "size")}, method: {Method}).";
-            var sb = new StringBuilder(head + " - INCOMPLETE.");
+            var skipped = Skipped.Count == 0 ? "" :
+                $" {Skipped.Count} protected non-game file(s) skipped ({string.Join(", ", Skipped.Take(3))}{(Skipped.Count > 3 ? ", ..." : "")}).";
+            if (Complete) return head + $" - complete, verified ({(ContentVerified ? "size + MD5" : "size")}, method: {Method})." + skipped;
+            var sb = new StringBuilder(head + " - INCOMPLETE." + skipped);
             if (!InventoryComplete)
                 sb.Append(" The folder could not be fully listed (" + string.Join("; ", InventoryErrors.Take(3)) +
                           $"); {LocalFileCount} file(s) were copied but cannot be verified.");
@@ -69,6 +77,9 @@ public sealed class UserDataBackup
     public required FolderBackupReport Obb { get; init; }
     public bool HasInternalData { get; set; }
     public List<string> Notes { get; } = new();
+
+    /// <summary>The user chose to skip the slow file-by-file copy: what was saved is kept but never restored.</summary>
+    public bool SkippedByUser { get; set; }
 
     public bool HasExternalData => ExternalData.Exists && ExternalData.Saved.Count > 0;
     public bool HasObb => Obb.Exists && Obb.Saved.Count > 0;
@@ -134,7 +145,30 @@ public sealed class UserDataService
         report.InventoryErrors.AddRange(errors);
         report.InventoryComplete = errors.Count == 0 && r.StdOut.Contains("__NCMK_END__:0");
         if (!report.InventoryComplete && errors.Count == 0) report.InventoryErrors.Add("find did not complete");
+
+        // Files adb is not allowed to read (e.g. crash tombstones written with owner-only permissions):
+        // a folder "adb pull" stops at the first one, so they are detected up front.
+        var nr = adb.Shell($"find \"{remote}\" -type f -exec sh -c 'for f; do [ -r \"$f\" ] || echo \"NOREAD|$f\"; done' sh {{}} +", TimeSpan.FromMinutes(5));
+        var root = remote.TrimEnd('/') + "/";
+        foreach (var line in nr.StdOut.Split('\n').Select(l => l.TrimEnd('\r')))
+            if (line.StartsWith("NOREAD|" + root, StringComparison.Ordinal)) report.Unreadable.Add(line[("NOREAD|" + root).Length..]);
+        foreach (var rel in report.Unreadable.Where(IsNonEssential).ToList())
+        {
+            report.Inventory.RemoveAll(f => f.RelativePath == rel);
+            report.Skipped.Add(rel);
+        }
         return report;
+    }
+
+    /// <summary>Crash dumps, caches and logs: not game data, never worth blocking a backup for.</summary>
+    public static bool IsNonEssential(string relativePath)
+    {
+        var name = relativePath[(relativePath.LastIndexOf('/') + 1)..];
+        return !IsRestorable(relativePath) ||
+               name.StartsWith("tombstone", StringComparison.OrdinalIgnoreCase) ||
+               name.EndsWith(".dmp", StringComparison.OrdinalIgnoreCase) ||
+               name.EndsWith(".log", StringComparison.OrdinalIgnoreCase) ||
+               relativePath.Contains("crash", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Parses "size|/full/path" lines; anything else non-empty is an error line.</summary>
@@ -191,19 +225,21 @@ public sealed class UserDataService
         return sb.ToString();
     }
 
-    public UserDataBackup Backup(AdbClient adb)
+    public UserDataBackup Backup(AdbClient adb, IUserInteraction? ui = null)
     {
         var dir = Path.Combine(_paths.UserDataBackupRoot, DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         Directory.CreateDirectory(dir);
         _log.Step("Backing up game data");
         _log.Info("Backup folder: " + dir);
 
-        var external = BackupFolder(adb, "Android/data", GameConstants.DeviceExternalData, "/sdcard/Android/data",
-            "/storage/emulated/0/Android/data", Path.Combine(dir, "data"));
-        var obb = BackupFolder(adb, "Android/obb", GameConstants.DeviceObbDir, "/sdcard/Android/obb",
-            "/storage/emulated/0/Android/obb", Path.Combine(dir, "obb"));
+        var skipped = false;
+        var external = BackupFolder(adb, ui, "Android/data", GameConstants.DeviceExternalData, "/sdcard/Android/data",
+            "/storage/emulated/0/Android/data", Path.Combine(dir, "data"), ref skipped);
+        var obb = BackupFolder(adb, ui, "Android/obb", GameConstants.DeviceObbDir, "/sdcard/Android/obb",
+            "/storage/emulated/0/Android/obb", Path.Combine(dir, "obb"), ref skipped);
 
-        var backup = new UserDataBackup { Directory = dir, ExternalData = external, Obb = obb };
+        var backup = new UserDataBackup { Directory = dir, ExternalData = external, Obb = obb, SkippedByUser = skipped };
+        if (skipped) backup.Notes.Add("The slow file-by-file copy was skipped by the user: the partial copy is kept but never restored.");
 
         // Internal data is only reachable for debuggable packages.
         var probe = adb.Shell($"run-as {GameConstants.PackageName} ls 2>&1");
@@ -225,7 +261,8 @@ public sealed class UserDataService
         return backup;
     }
 
-    private FolderBackupReport BackupFolder(AdbClient adb, string label, string remote, string parentSdcard, string parentStorage, string localParent)
+    private FolderBackupReport BackupFolder(AdbClient adb, IUserInteraction? ui, string label, string remote, string parentSdcard,
+        string parentStorage, string localParent, ref bool skippedByUser)
     {
         _log.Step($"Listing {label} on the headset");
         var report = Inventory(adb, label, remote, localParent);
@@ -239,36 +276,132 @@ public sealed class UserDataService
         foreach (var f in report.Inventory.Take(40)) _log.Info($"    {FolderBackupReport.FormatSize(f.Size),10}  {f.RelativePath}");
         if (report.Inventory.Count > 40) _log.Info($"    ... and {report.Inventory.Count - 40} more (see inventory.txt)");
         foreach (var e in report.InventoryErrors.Take(10)) _log.Warn("    " + e);
+        foreach (var s in report.Skipped)
+            _log.Info($"    skipped (protected by Android, not game data): {s}");
+        foreach (var u in report.Unreadable.Except(report.Skipped))
+            _log.Warn($"    protected by Android (Permission denied): {u}");
         Directory.CreateDirectory(localParent);
 
         var pkg = Path.GetFileName(report.LocalPath);
-        var methods = new (string name, Func<bool> run)[]
+        // A folder "adb pull" aborts at the first protected file, so it is pointless when there are any.
+        var folderPullUseful = report.Unreadable.Count == 0;
+        var methods = new List<(string name, Func<bool> run)>();
+        if (folderPullUseful)
         {
-            ("adb pull", () => adb.Pull(remote, localParent, TimeSpan.FromHours(1))),
-            ("adb pull via /storage/emulated/0", () => adb.Pull($"{parentStorage}/{pkg}", localParent, TimeSpan.FromHours(1))),
-            ("tar stream (adb exec-out)", () => TarStream(adb, parentSdcard, pkg, localParent)),
-            ("staging copy in /sdcard/Download", () => StagingCopy(adb, remote, pkg, localParent)),
-            ("file by file", () => FileByFile(adb, report)),
-        };
+            methods.Add(("adb pull", () => adb.Pull(remote, localParent, TimeSpan.FromHours(1))));
+            methods.Add(("adb pull via /storage/emulated/0", () => adb.Pull($"{parentStorage}/{pkg}", localParent, TimeSpan.FromHours(1))));
+        }
+        else
+        {
+            _log.Info($"  {report.Unreadable.Count} protected file(s): skipping the folder pull (it stops at the first one), using tar.");
+        }
+        methods.Add(("tar stream (adb exec-out)", () => TarStream(adb, parentSdcard, pkg, localParent)));
+        methods.Add(("staging copy in /sdcard/Download", () => StagingCopy(adb, remote, pkg, localParent)));
 
+        if (RunMethods(adb, report, label, localParent, methods)) return Finish(adb, report);
+        if (report.Inventory.Count == 0 && report.InventoryComplete) return report;
+
+        // Still missing: the last method copies file by file (with a "cat" fallback per file). It is slow
+        // on big folders, so the user decides.
+        if (skippedByUser)
+        {
+            _log.Warn($"  {label}: slow copy skipped (game data backup skipped by the user).");
+            return report;
+        }
+        if (ui != null)
+        {
+            var missing = report.Missing.Count;
+            var choice = ui.Choose($"{label}: {missing} file(s) still missing",
+                $"The fast copy methods saved {report.Saved.Count}/{report.Inventory.Count} files of {label}." + Environment.NewLine +
+                string.Join(Environment.NewLine, report.Missing.Take(8).Select(m => "  - " + m)) +
+                (missing > 8 ? Environment.NewLine + $"  ... and {missing - 8} more" : "") + Environment.NewLine + Environment.NewLine +
+                "Last method: copy every missing file one by one. It is slower (about 5-20 min)." + Environment.NewLine +
+                "Skip: continue without the game data backup (the partial copy is kept on the PC but never restored).",
+                new[] { "Skip game data backup", "Use the slow method (5-20 min)" });
+            if (choice != 1)
+            {
+                skippedByUser = true;
+                _log.Warn($"  {label}: slow copy skipped by the user ({report.Saved.Count}/{report.Inventory.Count} files saved).");
+                return report;
+            }
+        }
+        RunMethods(adb, report, label, localParent, new List<(string, Func<bool>)> { ("file by file (slow)", () => FileByFile(adb, report)) });
+        return Finish(adb, report);
+    }
+
+    private FolderBackupReport Finish(AdbClient adb, FolderBackupReport report)
+    {
+        if (report.Saved.Count > 0) VerifyBackupContent(adb, report);
+        return report;
+    }
+
+    /// <summary>Runs copy methods until nothing is missing; true when the folder is complete.</summary>
+    private bool RunMethods(AdbClient adb, FolderBackupReport report, string label, string localParent, List<(string name, Func<bool> run)> methods)
+    {
         foreach (var (name, run) in methods)
         {
-            if (report.Inventory.Count == 0 && report.InventoryComplete) { report.Method = "nothing to copy"; break; }
+            if (report.Inventory.Count == 0 && report.InventoryComplete) { report.Method = "nothing to copy"; return true; }
             _log.Step($"Saving {label}: {name}");
             bool ok;
-            try { ok = run(); }
-            catch (Exception ex) { ok = false; _log.Warn($"  {name} failed: {ex.Message}"); }
+            using (StartProgress(report, label, localParent))
+            {
+                try { ok = run(); }
+                catch (Exception ex) { ok = false; _log.Warn($"  {name} failed: {ex.Message}"); }
+            }
             VerifyLocal(report);
             report.Attempts.Add($"{name}: {(ok ? "ok" : "errors")}, {report.Saved.Count}/{report.Inventory.Count} files verified");
             _log.Info("  " + report.Attempts[^1]);
             if (report.Missing.Count == 0 && report.Inventory.Count > 0)
             {
                 report.Method = name;
-                if (report.InventoryComplete) break;
+                if (report.InventoryComplete) return true;
             }
         }
-        if (report.Saved.Count > 0) VerifyBackupContent(adb, report);
-        return report;
+        return false;
+    }
+
+    /// <summary>
+    /// Live progress while a method copies: files present locally and bytes written (the tar stream
+    /// grows as one file, so its size counts too), refreshed every second.
+    /// </summary>
+    private IDisposable StartProgress(FolderBackupReport report, string label, string localParent)
+    {
+        var key = "backup:" + label;
+        var total = Math.Max(1, report.TotalBytes);
+        var count = report.Inventory.Count;
+        void Tick()
+        {
+            try
+            {
+                long bytes = 0;
+                var files = 0;
+                if (Directory.Exists(localParent))
+                    foreach (var f in new DirectoryInfo(localParent).EnumerateFiles("*", SearchOption.AllDirectories))
+                    {
+                        bytes += f.Length;
+                        if (!f.Name.EndsWith(".tar", StringComparison.Ordinal)) files++;
+                    }
+                var frac = Math.Min(1.0, (double)bytes / total);
+                _log.ReportProgress(key, $"{label}: {KitLog.ProgressBar(frac)}  {Math.Min(files, count)}/{count} files · " +
+                                         $"{FolderBackupReport.FormatSize(Math.Min(bytes, total))} / {FolderBackupReport.FormatSize(total)}", frac);
+            }
+            catch
+            {
+                // files are being written; next tick
+            }
+        }
+        var timer = new Timer(_ => Tick(), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+        return new ProgressScope(() =>
+        {
+            timer.Dispose();
+            _log.EndProgress(key);
+        });
+    }
+
+    private sealed class ProgressScope(Action end) : IDisposable
+    {
+        private Action? _end = end;
+        public void Dispose() { _end?.Invoke(); _end = null; }
     }
 
     /// <summary>
@@ -387,7 +520,15 @@ public sealed class UserDataService
         {
             var local = Path.Combine(report.LocalPath, missing.RelativePath.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(local)!);
-            if (!adb.Pull($"{report.RemotePath}/{missing.RelativePath}", local, TimeSpan.FromMinutes(30))) allOk = false;
+            var remotePath = $"{report.RemotePath}/{missing.RelativePath}";
+            if (adb.Pull(remotePath, local, TimeSpan.FromMinutes(30))) continue;
+            // Second chance through the shell (different code path than the adb sync service).
+            var (ok, _) = adb.ExecOutToFile($"cat \"{remotePath}\"", local, TimeSpan.FromMinutes(30));
+            if (!ok || new FileInfo(local).Length != missing.Size)
+            {
+                try { File.Delete(local); } catch { /* reported as missing */ }
+                allOk = false;
+            }
         }
         return allOk;
     }

@@ -79,6 +79,20 @@ internal static class Program
         }
 
         var svc = new ModKitService();
+        var progressShown = false;
+        svc.Log.Progress += (_, text, _) =>
+        {
+            if (Console.IsOutputRedirected) return;
+            if (text == null)
+            {
+                if (progressShown) Console.Write("\r" + new string(' ', Math.Max(0, Console.WindowWidth - 1)) + "\r");
+                progressShown = false;
+                return;
+            }
+            var w = Math.Max(20, Console.WindowWidth - 1);
+            Console.Write("\r" + (text.Length > w ? text[..w] : text.PadRight(w)));
+            progressShown = true;
+        };
         svc.Log.Message += (level, msg) =>
         {
             if (level == LogLevel.Debug && !args.Contains("--verbose")) return;

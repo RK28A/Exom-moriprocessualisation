@@ -105,6 +105,7 @@ public partial class MainWindow : Window
         _logView.Filter = o => o is LogEntry e && PassesFilter(e);
 
         _svc.Log.Message += (level, msg) => Dispatcher.BeginInvoke(() => OnLog(level, msg));
+        _svc.Log.Progress += (key, text, fraction) => Dispatcher.BeginInvoke(() => OnProgress(key, text, fraction));
         _clock.Tick += (_, _) => ActivityTime.Text = _opWatch.IsRunning ? $"{_opWatch.Elapsed:mm\\:ss}" : ActivityTime.Text;
         _watcher.Tick += async (_, _) => await WatchDevicesAsync();
         SubtitleText.Text = $"NCMK {typeof(ModKitService).Assembly.GetName().Version?.ToString(3)} - com.mandegames.NightClubSimulater - Quest 2 / Pro / 3 / 3S";
@@ -185,6 +186,32 @@ public partial class MainWindow : Window
         _log.Add(new LogEntry { Time = DateTime.Now.ToString("HH:mm:ss"), Level = level, Glyph = glyph, Text = msg, Brush = brush, Weight = weight });
         if (_log.Count > 5000) _log.RemoveAt(0);
         if (AutoScroll.IsChecked == true && LogList.Items.Count > 0) LogList.ScrollIntoView(LogList.Items[^1]);
+    }
+
+    private readonly Dictionary<string, LogEntry> _progressLines = new();
+
+    /// <summary>One log line per running copy, updated in place; the progress bar follows it.</summary>
+    private void OnProgress(string key, string? text, double? fraction)
+    {
+        _progressLines.TryGetValue(key, out var old);
+        if (text == null)
+        {
+            if (old != null) _log.Remove(old);
+            _progressLines.Remove(key);
+            if (_busy) Progress.IsIndeterminate = true;
+            return;
+        }
+        var entry = new LogEntry { Time = DateTime.Now.ToString("HH:mm:ss"), Level = LogLevel.Info, Glyph = "⏳", Text = text, Brush = Palette.Accent };
+        var index = old != null ? _log.IndexOf(old) : -1;
+        if (index >= 0) _log[index] = entry;
+        else _log.Add(entry);
+        _progressLines[key] = entry;
+        if (fraction is { } f)
+        {
+            Progress.IsIndeterminate = false;
+            Progress.Value = f * 100;
+        }
+        if (index < 0 && AutoScroll.IsChecked == true && LogList.Items.Count > 0) LogList.ScrollIntoView(LogList.Items[^1]);
     }
 
     private bool PassesFilter(LogEntry e) => LogFilter.SelectedIndex switch

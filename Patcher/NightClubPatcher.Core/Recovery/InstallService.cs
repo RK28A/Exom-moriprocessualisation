@@ -66,22 +66,24 @@ public sealed class InstallService
         UserDataBackup? data = null;
         if (mode.BacksUp())
         {
-            data = _userData.Backup(adb);
+            data = _userData.Backup(adb, ui);
 
             // Always show exactly what was (and was not) saved before anything is uninstalled.
-            var complete = data.AccessibleDataComplete;
+            var complete = data.AccessibleDataComplete || data.SkippedByUser;
             var after = mode.Restores()
                 ? "Continue = uninstall the current game, install the new build, restore the saved files."
                 : "Continue = uninstall the current game and install the new build. The saved files are NOT restored (" +
                   mode.Label() + "); they stay in the backup folder.";
-            var message = (complete
+            var message = (data.SkippedByUser
+                              ? "Game data backup skipped (your choice). Uninstalling removes the game's data from the headset; a partial copy stays on the PC:"
+                              : complete
                               ? "All game data adb can reach was saved and verified file by file:"
                               : "WARNING: the game data backup is INCOMPLETE. Uninstalling now can lose your progress.") +
                           Environment.NewLine + Environment.NewLine + data.Describe() + Environment.NewLine + Environment.NewLine +
                           "The full file list is in inventory.txt in the backup folder." + Environment.NewLine +
                           (complete ? after : "Recommended: Cancel. Nothing has been uninstalled; your game and its data are untouched.");
             var options = complete
-                ? new[] { "Cancel", mode.Restores() ? "Uninstall, install and restore data" : "Uninstall and install" }
+                ? new[] { "Cancel", mode.Restores() && !data.SkippedByUser ? "Uninstall, install and restore data" : "Uninstall and install" }
                 : new[] { "Cancel (keep the current game untouched)", "Continue anyway - I accept losing the missing data" };
             if (ui.Choose(complete ? "Game data saved - confirm reinstall" : "Game data backup INCOMPLETE", message, options) != 1)
                 return new InstallResult(false,
@@ -125,7 +127,12 @@ public sealed class InstallService
             GameDataMode.Clean => "Reinstalled clean; the game creates fresh data on first launch.",
             _ => "Reinstalled with data restore.",
         };
-        if (mode.Restores() && data != null)
+        if (mode.Restores() && data is { SkippedByUser: true })
+        {
+            note = "Reinstalled. Game data backup was skipped, so nothing was restored; the game starts with fresh data.";
+            _log.Info(note);
+        }
+        else if (mode.Restores() && data != null)
         {
             // A failed restore never fails the install: the game is installed and can be launched;
             // the backup stays on the PC.

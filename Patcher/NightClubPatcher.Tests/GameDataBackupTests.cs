@@ -97,9 +97,13 @@ public class GameDataBackupTests
                 cmd="$1"; shift
                 case "$cmd" in
                   shell)
+                    if [ -n "$FAKE_NOREAD" ] && [[ "$1" == *NOREAD* ]]; then
+                      find "$ROOT/sdcard/Android" -type f | grep -E "$FAKE_NOREAD" | sed "s/^/NOREAD|/" | unmap; exit 0
+                    fi
                     sh -c "$(map "$1")" 2>&1 | unmap; exit 0 ;;
                   exec-out)
                     if [ -n "$FAIL_TAR" ] && [[ "$1" == tar* ]]; then echo "tar: denied" >&2; exit 1; fi
+                    if [ -n "$FAIL_CAT" ] && [[ "$1" == cat* ]] && [[ "$1" =~ $FAIL_CAT ]]; then echo "cat: Permission denied" >&2; exit 1; fi
                     sh -c "$(map "$1")"; exit $? ;;
                   pull)
                     src="$1"; dst="$2"
@@ -137,8 +141,11 @@ public class GameDataBackupTests
         public UserDataService? Service;
         public AdbClient? Adb;
 
-        public UserDataBackup RunBackup(string? failPull = null, bool failTar = false, bool failCp = false, string? failFile = null)
+        public UserDataBackup RunBackup(string? failPull = null, bool failTar = false, bool failCp = false, string? failFile = null,
+            IUserInteraction? ui = null, string? noRead = null, string? failCat = null)
         {
+            Environment.SetEnvironmentVariable("FAIL_CAT", failCat);
+            Environment.SetEnvironmentVariable("FAKE_NOREAD", noRead);
             Environment.SetEnvironmentVariable("FAIL_PULL", failPull);
             Environment.SetEnvironmentVariable("FAIL_TAR", failTar ? "1" : null);
             Environment.SetEnvironmentVariable("FAIL_FILE", failFile);
@@ -148,12 +155,12 @@ public class GameDataBackupTests
             var log = new KitLog(null);
             Service = new UserDataService(paths, log);
             Adb = new AdbClient(AdbPath, log);
-            return Service.Backup(Adb);
+            return Service.Backup(Adb, ui);
         }
 
         public void Dispose()
         {
-            foreach (var v in new[] { "FAKE_ROOT", "FAIL_PULL", "FAIL_TAR", "FAIL_FILE" }) Environment.SetEnvironmentVariable(v, null);
+            foreach (var v in new[] { "FAKE_ROOT", "FAIL_PULL", "FAIL_TAR", "FAIL_FILE", "FAKE_NOREAD", "FAIL_CAT" }) Environment.SetEnvironmentVariable(v, null);
             Tmp.Dispose();
         }
     }
@@ -193,7 +200,7 @@ public class GameDataBackupTests
     {
         if (!CanRunFakeAdb) return;
         using var q = new FakeQuest();
-        var b = q.RunBackup(failPull: "Android/data/[^/]+$", failTar: true, failCp: true, failFile: "secret");
+        var b = q.RunBackup(failPull: "Android/data/[^/]+$", failTar: true, failCp: true, failFile: "secret", failCat: "secret");
         Assert.False(b.ExternalData.Complete);
         Assert.False(b.AccessibleDataComplete);
         Assert.Equal(2, b.ExternalData.Saved.Count);                   // file-by-file saved the readable ones
@@ -300,6 +307,61 @@ public class GameDataBackupTests
         var b = q.RunBackup();
         File.WriteAllText(Path.Combine(b.ExternalData.LocalPath, "files", "settings.cfg"), "corrupted!!");  // size changed
         Assert.False(q.Service!.Restore(q.Adb!, b));
+    }
+
+    private sealed class Answer(int choice) : IUserInteraction
+    {
+        public List<string> Asked { get; } = new();
+        public int Choose(string title, string message, IReadOnlyList<string> options) { Asked.Add(title); return choice; }
+        public void Notify(string title, string message) { }
+    }
+
+    [Fact]
+    public void Protected_tombstone_is_skipped_and_the_folder_pull_is_not_tried()
+    {
+        if (!CanRunFakeAdb) return;
+        using var q = new FakeQuest();
+        var tomb = Path.Combine(q.Root, "sdcard", "Android", "data", GameConstants.PackageName, "files", "tombstone_00");
+        File.WriteAllText(tomb, "crash dump");
+        var b = q.RunBackup(failPull: "Android/data/[^/]+$", noRead: "tombstone_00");
+        Assert.Contains("files/tombstone_00", b.ExternalData.Skipped);
+        Assert.DoesNotContain(b.ExternalData.Inventory, f => f.RelativePath == "files/tombstone_00");
+        Assert.True(b.ExternalData.Complete, b.ExternalData.Summary);
+        Assert.Equal("tar stream (adb exec-out)", b.ExternalData.Method);
+        Assert.DoesNotContain(b.ExternalData.Attempts, a => a.StartsWith("adb pull", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void User_can_skip_the_slow_method()
+    {
+        if (!CanRunFakeAdb) return;
+        using var q = new FakeQuest();
+        var ui = new Answer(0);
+        var b = q.RunBackup(failPull: "Android/data/[^/]+$", failTar: true, failCp: true, failFile: "secret", ui: ui);
+        Assert.Single(ui.Asked);
+        Assert.True(b.SkippedByUser);
+        Assert.False(b.ExternalData.Complete);
+        Assert.DoesNotContain(b.ExternalData.Attempts, a => a.StartsWith("file by file", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Slow_method_falls_back_to_cat_for_files_adb_pull_refuses()
+    {
+        if (!CanRunFakeAdb) return;
+        using var q = new FakeQuest();
+        var ui = new Answer(1);
+        var b = q.RunBackup(failPull: "Android/data/[^/]+$", failTar: true, failCp: true, failFile: "secret", ui: ui);
+        Assert.Single(ui.Asked);
+        Assert.False(b.SkippedByUser);
+        Assert.True(b.ExternalData.Complete, b.ExternalData.Summary);
+        Assert.Equal("file by file (slow)", b.ExternalData.Method);
+    }
+
+    [Fact]
+    public void Progress_bar_text()
+    {
+        Assert.Equal("[██████████░░░░░░░░░░]  50%", KitLog.ProgressBar(0.5));
+        Assert.EndsWith("100%", KitLog.ProgressBar(2));
     }
 
     [Fact]

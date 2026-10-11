@@ -567,7 +567,7 @@ public sealed class ModKitService
     {
         var connected = ui != null ? ConnectDevice(ui, out var msg) : ConnectDevice(out msg);
         if (!connected) { Log.Error(msg); return null; }
-        return UserData.Backup(Adb);
+        return UserData.Backup(Adb, ui);
     }
 
     // ------------------------------------------------------------------ recovery
