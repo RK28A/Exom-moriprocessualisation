@@ -345,7 +345,7 @@ Options: `--allow-unverified`, `--no-mods`, `--loader <path>`, `--mods keep|disa
 | Never edit the backup | all work happens on a copy in `%TEMP%\NCMK\…` |
 | Unknown update ⇒ no auto patch | version profile + SHA-256 of libmain/libunity/libil2cpp/global-metadata → `KNOWN BUILD` / `UNKNOWN GAME UPDATE` |
 | One permanent signing key | `Keys/NCMK.keystore`, never regenerated automatically (back it up!) |
-| Signature mismatch | detected up front (installed signer hash from `dumpsys package`) and on `INSTALL_FAILED_UPDATE_INCOMPATIBLE` → *Cancel* / *Uninstall and reinstall* (the game's local data, only a few settings, is reset; nothing is backed up) |
+| Signature mismatch | detected up front (installed signer hash from `dumpsys package`) and on `INSTALL_FAILED_UPDATE_INCOMPATIBLE` → *Cancel* / *Uninstall and reinstall*. The game's **OBB files** (game content in `/sdcard/Android/obb/<pkg>`, deleted with the package) are saved to `Backups\<pkg>\obb\` first (size + MD5 verified; nothing is uninstalled if that fails) and put back after the install; save data is not backed up |
 | Unpinned build | patching asks *Pin fingerprints and continue* (pins the verified original backup, then patches) |
 | No silent uninstall | uninstall only after explicit confirmation |
 | Mod files survive restore | `…/files/NCMKMods` → Keep / rename to `NCMKMods.disabled` / Delete (asked) |
@@ -366,8 +366,15 @@ RESTORE ORIGINAL remains the safest option.
 
 ### About user data
 
-NCMK does not back up or restore game data. The game keeps almost nothing (a few settings);
+NCMK does not back up or restore save data. The game keeps almost nothing (a few settings);
 when a signature change forces an uninstall, it simply starts with fresh data.
+
+The game's **OBB files** are different: they are the game itself (Unity loads its `Resources` and every
+scene after `Loading` from `/sdcard/Android/obb/<pkg>/main.<versionCode>.<pkg>.obb`). Android deletes them
+with the package, and without them the game stays on its Loading screen. NCMK saves them with
+**Backup Original** and before every uninstall (`Backups\<pkg>\obb\`, verified by size + MD5, reused when
+identical), puts them back after the install, and also puts them back when an install finds the headset
+without its OBB. If they were already lost, reinstall the game from the store once, then patch again.
 
 ## Scene loader diagnostics (stuck in "Loading")
 

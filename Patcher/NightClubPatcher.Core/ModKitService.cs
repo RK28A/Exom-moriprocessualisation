@@ -65,6 +65,9 @@ public sealed class ModKitService
     public PatchEngine Patcher { get; }
     public InstallService Installer { get; }
 
+    /// <summary>The game's OBB files (game content outside the APK), saved around signature-change reinstalls.</summary>
+    public ObbService Obb { get; }
+
     public RestoreService Restorer { get; }
     public LogcatService Logcat { get; }
     public ToolSetup ToolSetup { get; }
@@ -85,7 +88,8 @@ public sealed class ModKitService
         Profiles = new ProfileStore(Paths);
         Builds = new BuildStore(Paths, Log);
         Patcher = new PatchEngine(Paths, Log, Backups, Profiles, Builds, Signer, Keys);
-        Installer = new InstallService(Log);
+        Obb = new ObbService(Paths, Log);
+        Installer = new InstallService(Log, Obb);
         Restorer = new RestoreService(Log, Backups, Installer);
         Logcat = new LogcatService(Log);
         ToolSetup = new ToolSetup(Paths, Tools, Log);
@@ -404,6 +408,20 @@ public sealed class ModKitService
             ExpectedOriginalSignerSha256 = existing?.Metadata?.SignerSha256,
         });
         Log.Info(result.Message);
+        // The OBB belongs to the original game too: save it while the store build is installed.
+        if (result.Outcome is BackupOutcome.Created or BackupOutcome.AlreadyExists)
+        {
+            try
+            {
+                var obb = Obb.Save(Adb);
+                if (!obb.Ok) Log.Warn(obb.Message);
+                else if (!obb.DeviceHadObb) Log.Info(obb.Message);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("OBB backup failed: " + ex.Message);
+            }
+        }
         return result;
     }
 
@@ -664,6 +682,13 @@ public sealed class ModKitService
             r.Add("OBB folder", obbMissing ? CheckStatus.Warn : CheckStatus.Info,
                 obbMissing ? GameConstants.DeviceObbDir + " does not exist (if the store build uses an OBB, the game cannot load its content)"
                            : GameConstants.DeviceObbDir + Environment.NewLine + obb);
+            var savedObb = Directory.Exists(Obb.LocalDir)
+                ? Directory.EnumerateFiles(Obb.LocalDir, "*", SearchOption.AllDirectories).Where(f => !f.EndsWith(".part")).ToList()
+                : new List<string>();
+            r.Add("OBB saved by NCMK", savedObb.Count > 0 ? CheckStatus.Info : obbMissing ? CheckStatus.Warn : CheckStatus.Info,
+                savedObb.Count == 0
+                    ? "none (Backup Original or a reinstall saves them while the store game is installed)"
+                    : string.Join(Environment.NewLine, savedObb.Select(f => $"{Path.GetFileName(f)}  {ObbService.FormatSize(new FileInfo(f).Length)}")));
             var perms = Adb.Shell($"dumpsys package {GameConstants.PackageName} | grep -E 'EXTERNAL_STORAGE|MANAGE_EXTERNAL'").StdOut.Trim();
             r.Add("Storage permissions", CheckStatus.Info, perms.Length == 0 ? "none requested/granted" : perms);
             r.Add("Mod folder", CheckStatus.Info, Adb.RemoteExists(GameConstants.DeviceModsRoot) ? GameConstants.DeviceModsRoot : "absent");
