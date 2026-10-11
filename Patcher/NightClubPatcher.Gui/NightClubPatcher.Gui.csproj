@@ -10,6 +10,7 @@
     <AssemblyName>NightClubPatcher</AssemblyName>
     <RootNamespace>NightClubPatcher.Gui</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\ncmk.ico</ApplicationIcon>
     <Product>NightClub Simulator Mod Patcher</Product>
     <AssemblyTitle>NightClub Simulator Mod Patcher</AssemblyTitle>
   </PropertyGroup>
@@ -22,6 +23,11 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <DebugType>embedded</DebugType>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\ncmk.ico" />
+    <Resource Include="Assets\ncmk.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\NightClubPatcher.Core\NightClubPatcher.Core.csproj" />

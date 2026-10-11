@@ -65,6 +65,13 @@ public sealed class ModKitService
     public PatchEngine Patcher { get; }
     public UserDataService UserData { get; }
     public InstallService Installer { get; }
+
+    /// <summary>What a signature-mismatch reinstall does with the game data (CLI --data, GUI "Game Data Mode").</summary>
+    public GameDataMode DataMode
+    {
+        get => Installer.DataMode;
+        set => Installer.DataMode = value;
+    }
     public RestoreService Restorer { get; }
     public LogcatService Logcat { get; }
     public ToolSetup ToolSetup { get; }
@@ -133,7 +140,7 @@ public sealed class ModKitService
     {
         Log.Step("Checking tools");
         var states = ToolSetup.CheckAll(includeNative ? ToolSetup.AllTools : ToolSetup.AllTools.Except(ToolSetup.NativeTools));
-        foreach (var st in states) Log.Info($"{st.Name}: {st.StatusText}");
+        foreach (var st in states) Log.Info($"{st.Name}: {st.StatusText}" + (st.Location != null ? $"  [{st.Location}]" : ""));
         var todo = states.Where(st => !st.Ready).Select(st => st.Id).ToList();
         if (todo.Count == 0)
         {
@@ -426,9 +433,11 @@ public sealed class ModKitService
         return latest;
     }
 
-    public VersionProfile PinFingerprints()
+    public VersionProfile PinFingerprints() => PinFingerprints(Backups.Latest() ?? throw new InvalidOperationException("No original backup to pin."));
+
+    /// <summary>Pins the fingerprints of a verified original backup (Versions/&lt;build&gt;.json).</summary>
+    public VersionProfile PinFingerprints(OriginalBackup b)
     {
-        var b = Backups.Latest() ?? throw new InvalidOperationException("No original backup to pin.");
         var v = Backups.Verify(b, InspectOptions());
         if (!v.Ok || v.Analysis == null) throw new InvalidOperationException("Backup verification failed: " + string.Join("; ", v.Problems));
         var p = Profiles.Pin(v.Analysis);
@@ -446,16 +455,34 @@ public sealed class ModKitService
     {
         if (ui != null && !SelectDevice(ui, DevicePurpose.PatchOnly))
             return PatchResult.Fail("Patch cancelled: no device selected.");
-        return PatchSelected(options);
+        return PatchSelected(options, ui);
     }
 
-    private PatchResult PatchSelected(PatchOptions options)
+    private PatchResult PatchSelected(PatchOptions options, IUserInteraction? ui = null)
     {
         if (Adb.Available && Adb.DetectDevice(out var dev) == DeviceState.Connected)
             options.TargetDevice = $"{Adb.IdentifyHeadset().DisplayName} ({dev?.Serial})";
         var backup = EnsureBackup(out var msg);
         Log.Info(msg);
         if (backup == null) return PatchResult.Fail("No original backup available. Connect the Quest with the original game installed.");
+        var r = Patcher.Patch(backup, options);
+        if (r.Ok || !r.NeedsPin || ui == null) return r;
+
+        // Not pinned yet: offer to pin the verified backup's fingerprints right here and carry on.
+        var choice = ui.Choose("Build not verified yet",
+            r.Message + Environment.NewLine + Environment.NewLine +
+            "Pin fingerprints records the hashes of your verified original backup (Versions/<build>.json) so this exact " +
+            "build is treated as known. Only do this for a game you installed from the store.",
+            new[] { "Cancel", "Pin fingerprints and continue" });
+        if (choice != 1) return r;
+        try
+        {
+            PinFingerprints(backup);
+        }
+        catch (Exception ex)
+        {
+            return PatchResult.Fail("Could not pin fingerprints: " + ex.Message);
+        }
         return Patcher.Patch(backup, options);
     }
 
@@ -477,7 +504,7 @@ public sealed class ModKitService
         if (!SelectDevice(ui, DevicePurpose.PatchAndInstall))
             return (PatchResult.Fail("Patch + install cancelled: no headset selected."), null);
         if (!ConnectDevice(out var connectMsg)) return (PatchResult.Fail(connectMsg), null);
-        var p = PatchSelected(options);
+        var p = PatchSelected(options, ui);
         if (!p.Ok || p.OutputApk == null) return (p, null);
         if (!ConnectDevice(out var msg)) return (p, new InstallResult(false, msg));
         var backup = Backups.Latest();

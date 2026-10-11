@@ -23,6 +23,7 @@ public static class ErrorDialog
             Background = (Brush)res["Bg"],
         };
         if (owner != null) win.Owner = owner;
+        App.ApplyChrome(win);
 
         var root = new StackPanel { Margin = new Thickness(20) };
         root.Children.Add(new TextBlock

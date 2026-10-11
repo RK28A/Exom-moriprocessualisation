@@ -46,6 +46,40 @@ public class NativeToolsTests
     }
 
     [Fact]
+    public void Tools_installed_by_another_kit_copy_or_the_shared_folder_are_reused()
+    {
+        using var tmp = new TempDir();
+        var shared = tmp.File("shared-tools");
+        var old = Environment.GetEnvironmentVariable("NCMK_SHARED_TOOLS");
+        Environment.SetEnvironmentVariable("NCMK_SHARED_TOOLS", shared);
+        try
+        {
+            // A previously unzipped kit next to this one, with its own tools.
+            var sibling = tmp.File(Path.Combine("downloads", "NCMK-main (1)", "Release", "Tools"));
+            Touch(Path.Combine(sibling, "tools.json"), "{}");
+            Touch(Path.Combine(sibling, "ninja", Exe("ninja")));
+            var paths = new KitPaths(tmp.File(Path.Combine("downloads", "NCMK-main", "Release")));
+            paths.EnsureCreated();
+            Touch(Path.Combine(shared, "cmake", "bin", Exe("cmake")));
+
+            var tools = new ToolLocator(paths);
+            Assert.Equal(shared, tools.InstallRoot);
+            Assert.Equal(Path.GetFullPath(Path.Combine(shared, "cmake", "bin", Exe("cmake"))), Path.GetFullPath(tools.FindCMake()!));
+            Assert.Equal(Path.GetFullPath(Path.Combine(sibling, "ninja", Exe("ninja"))), Path.GetFullPath(tools.FindNinja()!));
+            Assert.True(tools.IsBundled(tools.FindNinja()));
+
+            // BundledOnly (CI clean-machine test) keeps everything inside the kit.
+            var bundled = new ToolLocator(paths) { BundledOnly = true };
+            Assert.Equal(paths.Tools, bundled.InstallRoot);
+            Assert.Null(bundled.FindNinja());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("NCMK_SHARED_TOOLS", old);
+        }
+    }
+
+    [Fact]
     public void Incomplete_ndk_folder_is_not_accepted()
     {
         using var tmp = new TempDir();
