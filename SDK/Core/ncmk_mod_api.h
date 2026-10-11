@@ -147,9 +147,10 @@ typedef struct NCMKHostApi {
     NCMKObject* (*newObject)(NCMKClass* klass);
 
     /* Keeps a managed object alive while native code holds it: il2cpp_gchandle_new(obj, pinned=true).
-     * Returns a handle (0 on failure) to release with unpin. */
-    uint32_t (*pin)(NCMKObject* obj);
-    void (*unpin)(uint32_t handle);
+     * Returns a handle (0 on failure) to release with unpin. Handles are POINTER-SIZED (Unity 6's
+     * il2cpp treats them as addresses): always store them in a uintptr_t, never in 32 bits. */
+    uintptr_t (*pin)(NCMKObject* obj);
+    void (*unpin)(uintptr_t handle);
 
     /* Value of an enum member by name, e.g. getEnumValue(OVRInput.Button, "One", -1). */
     int64_t (*getEnumValue)(NCMKClass* enumClass, const char* name, int64_t fallback);

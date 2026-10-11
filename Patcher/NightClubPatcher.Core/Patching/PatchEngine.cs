@@ -99,7 +99,8 @@ public sealed class PatchEngine
 
             using var zip = new ZipArchiveReader(working);
 
-            var mods = CollectMods(options, loaderPath).ToList();
+            var mods = PlannedMods(options, loaderPath).Select(m => m.Path).ToList();
+            _log.Info(mods.Count == 0 ? "Embedded mods: none" : "Embedded mods: " + string.Join(", ", mods.Select(Path.GetFileName)));
             var (injected, loaderSha) = BuildUnsignedPatchedApk(zip, original, loaderBytes, mods, ws, _log);
             var unsigned = Path.Combine(ws.Patched, "unsigned.apk");
 
@@ -204,19 +205,27 @@ public sealed class PatchEngine
         ApkRewriter.Rewrite(zip, output, plan);
     }
 
-    private IEnumerable<string> CollectMods(PatchOptions options, string loaderPath)
+    /// <summary>
+    /// Every libncmkmod_*.so (and legacy libncsmod_*.so) next to the loader (Native/out/arm64-v8a
+    /// after "Build Native Loader") and in the kit payload folders, plus explicit extra mods.
+    /// A newly built mod is embedded without any setting; "Build Native Loader" removes outputs of
+    /// deleted Mods/ folders, so they are not embedded by accident.
+    /// </summary>
+    public IReadOnlyList<(string Name, string Path)> PlannedMods(PatchOptions options, string? loaderPath = null)
     {
+        loaderPath ??= options.LoaderPath ?? _paths.FindLoader();
         var mods = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (options.EmbedMods)
         {
-            var dirs = new[] { Path.GetDirectoryName(loaderPath)! }.Concat(_paths.ModPayloadDirs()).Distinct();
+            var first = loaderPath != null ? new[] { Path.GetDirectoryName(loaderPath)! } : Array.Empty<string>();
+            var dirs = first.Concat(_paths.ModPayloadDirs()).Distinct();
             foreach (var dir in dirs.Where(Directory.Exists))
                 foreach (var prefix in GameConstants.AllModLibPrefixes)
                     foreach (var f in Directory.EnumerateFiles(dir, prefix + "*.so"))
                         mods.TryAdd(Path.GetFileName(f), f);
         }
         foreach (var f in options.ExtraMods) mods[Path.GetFileName(f)] = f;
-        return mods.Values;
+        return mods.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => (kv.Key, kv.Value)).ToList();
     }
 
     /// <summary>Split APKs must carry the same certificate as base.apk, so they are re-signed unchanged.</summary>

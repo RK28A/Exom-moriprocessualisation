@@ -101,7 +101,7 @@ SDK/                        headers for mod authors
   Core/ncmk_mod_api.h        stable C ABI (NCMK_LOADER_API = 2)
   Core/ncmk_sdk.hpp  Il2Cpp/ncmk_il2cpp.hpp  Unity/ncmk_unity.hpp
   Input/ncmk_input.hpp  UI/ncmk_ui.hpp  Config/ncmk_config.hpp
-Mods/HelloWorld  Mods/DebugOverlay   sample mods
+Mods/<Name>/                one folder per mod (mod.json + .cpp) - HelloWorld, DebugOverlay
 DeviceMods/                 Mods/ + Config/ pushed to the headset's NCMKMods folder
 Tools/  Versions/  Backups/  Builds/  Cache/  Logs/  Keys/
 ```
@@ -394,6 +394,11 @@ example mod. In short, a mod is `libncmkmod_<name>.so` exporting `NCMKMod_GetInf
 `NCMKMod_Load` and any of `NCMKMod_OnUpdate` / `OnLateUpdate` / `OnFixedUpdate` /
 `OnSceneLoaded` (Unity main thread), `OnBackgroundTick` (worker, ~10 Hz) and `Unload`. Mods built
 for API 1 and NightClubModKit-era mods (`libncsmod_*.so`, `NCSMod_*`) still load.
+
+**Adding a mod = create `Mods/<Name>/` with a `mod.json` and your `.cpp` files, then click Build
+Native Loader.** No other file is edited: the build discovers every folder, and the patcher embeds
+every built `libncmkmod_*.so` (it lists them before patching). Delete the folder to remove the mod;
+put a `.disabled` file in it to skip it.
 
 Mods are either embedded into the APK by the patcher (always works) or put in `DeviceMods\Mods\`
 and pushed to the headset (copied to app-private storage before `dlopen`).

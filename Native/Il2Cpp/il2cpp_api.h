@@ -62,8 +62,8 @@ typedef uint16_t Il2CppChar;
     X(const Il2CppType*, il2cpp_class_get_type, (Il2CppClass*))                                       \
     X(const Il2CppType*, il2cpp_class_enum_basetype, (Il2CppClass*))                                  \
     X(Il2CppObject*, il2cpp_type_get_object, (const Il2CppType*))                                     \
-    X(uint32_t, il2cpp_gchandle_new, (Il2CppObject*, bool))                                           \
-    X(void, il2cpp_gchandle_free, (uint32_t))                                                         \
+    X(uintptr_t, il2cpp_gchandle_new, (Il2CppObject*, bool))                                          \
+    X(void, il2cpp_gchandle_free, (uintptr_t))                                                        \
     X(void*, il2cpp_resolve_icall, (const char*))
 
 namespace NCMK {
@@ -112,8 +112,10 @@ const MethodInfo* FindMethodBySignature(Il2CppClass* klass, const char* name, co
 Il2CppClass* FindNestedClass(Il2CppClass* outer, const char* name);
 Il2CppObject* TypeOf(Il2CppClass* klass);
 Il2CppObject* NewObject(Il2CppClass* klass);
-uint32_t Pin(Il2CppObject* obj);
-void Unpin(uint32_t handle);
+/// GC handles are pointer-sized: in the game's libil2cpp (Unity 6) il2cpp_gchandle_free masks the
+/// handle with ~0x1fff and dereferences it, so it must never be truncated to 32 bits.
+uintptr_t Pin(Il2CppObject* obj);
+void Unpin(uintptr_t handle);
 int64_t GetEnumValue(Il2CppClass* enumClass, const char* name, int64_t fallback);
 bool IsStatic(const MethodInfo* method);
 

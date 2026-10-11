@@ -66,6 +66,13 @@ Legend: ✅ implemented and covered by automated tests · 🟡 implemented, **ne
 | 47 | Mods root `/sdcard/Android/data/<pkg>/files/NCMKMods` (no storage permission) + patcher push of mods/config | ✅ unit / 🟡 | loader `ResolveModsRoot`, `Mods/DeviceModPusher`, `--push-mods` |
 | 48 | Entitlement failure reported by diagnostics (no bypass) | ✅ unit / 🟡 | `LogcatFilter.EntitlementFailures` |
 | 49 | Re-signed APK passes the game's Meta entitlement check | 🟡 unknown | if it fails, diagnostics say so; NCMK will not work around it |
+| 50 | Drop-in mods: one `Mods/<Name>/` folder (mod.json + .cpp), auto-discovered by CMake, `.disabled`, duplicate-name check, stale outputs removed | ✅ host / 🟡 NDK on Windows | `Native/CMakeLists.txt`, `Mods/ModCatalog.cs`, host test scenario 8 |
+| 51 | Build Native Loader fails early and readably when `Mods\` or `SDK\` is missing from a Release folder | ✅ unit / 🟡 Windows | `NativeBuilder.MissingSourcesMessage`, `Native/build.ps1` |
+| 52 | GUI lists the mods that will be embedded before patching | 🟡 (WPF only built on CI) | `MainWindow.ConfirmEmbeddedMods`, `PatchEngine.PlannedMods` |
+| 53 | GC handles are pointer-sized (`uintptr_t`) end to end — fixes the crash on the first unpin with the game's libil2cpp | ✅ host (fake hands out handles > 4 GB) / 🟡 | `il2cpp_api`, `NCMKHostApi::pin/unpin`, `IL2CPP::Pinned` |
+| 54 | OVRInput pumped by the loader when there is no OVRManager instance | ✅ host / 🟡 | `Native/Unity/input_pump.cpp` |
+| 55 | `NCMK::Input` fallback through `UnityEngine.XR.InputDevices` when OVRInput is missing or silent | ✅ host / 🟡 (HurricaneVR rig) | `SDK/Input/ncmk_input.hpp` |
+| 56 | UI: `Image::SetSliced`, 9-slice `CreateSprite`, `Text::SetBold/SetOverflow`, `SetRaycastTarget`, `CreateRoundedSprite`, `CreateGlowSprite` | 🟡 (compiles; fake has no uGUI) | `SDK/UI/ncmk_ui.hpp` |
 
 ## Next steps, in order
 

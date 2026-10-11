@@ -7,7 +7,7 @@ on:
 
 jobs:
   native-android:
-    name: Native loader (Android NDK, arm64-v8a)
+    name: Native loader + every Mods/ folder (Android NDK, arm64-v8a)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,10 +20,26 @@ jobs:
           set -euo pipefail
           OUT=Native/out/arm64-v8a
           ls -la "$OUT"
-          # NCMK names only: loader + both samples, nothing with the old libncs* names.
-          for f in libncmkloader.so libncmkmod_helloworld.so libncmkmod_debugoverlay.so; do
-            test -f "$OUT/$f" || { echo "missing $f"; exit 1; }
-          done
+          # The loader + one library per Mods/<Name>/ folder with a mod.json (no .disabled), named by
+          # its "library" field (default libncmkmod_<folder lower case>.so). Nothing else, no libncs*.
+          EXPECTED=$(python3 - <<'PY'
+          import json, os, re
+          out = ["libncmkloader.so"]
+          for d in sorted(os.listdir("Mods")):
+              p = os.path.join("Mods", d)
+              if not os.path.isfile(os.path.join(p, "mod.json")) or os.path.exists(os.path.join(p, ".disabled")):
+                  continue
+              if not any(f.endswith(".cpp") for _, _, fs in os.walk(p) for f in fs):
+                  continue
+              lib = json.load(open(os.path.join(p, "mod.json"))).get("library") or "libncmkmod_" + re.sub("[^a-z0-9_]", "_", d.lower()) + ".so"
+              out.append(lib)
+          print(" ".join(sorted(out)))
+          PY
+          )
+          ACTUAL=$(cd "$OUT" && ls *.so | sort | tr '\n' ' ' | sed 's/ $//')
+          echo "expected: $EXPECTED"
+          echo "built   : $ACTUAL"
+          [ "$EXPECTED" = "$ACTUAL" ] || { echo "built libraries do not match Mods/"; exit 1; }
           if ls "$OUT" | grep -q '^libncs'; then echo "legacy libncs* output found"; exit 1; fi
           for f in "$OUT"/*.so; do
             echo "== $f"
@@ -38,8 +54,10 @@ jobs:
           SYMS() { readelf -Ws --dyn-syms "$1"; }
           SYMS $OUT/libncmkloader.so | grep -q ' NCMK_GetHostApi$'
           SYMS $OUT/libncmkloader.so | grep -q ' NCMK_Shutdown$'
-          SYMS $OUT/libncmkmod_helloworld.so | grep -qE ' NCMKMod_GetInfo$'
-          SYMS $OUT/libncmkmod_helloworld.so | grep -qE ' NCMKMod_Load$'
+          for f in "$OUT"/libncmkmod_*.so; do
+            SYMS "$f" | grep -qE ' NCMKMod_GetInfo$' || { echo "$f does not export NCMKMod_GetInfo"; exit 1; }
+            SYMS "$f" | grep -qE ' NCMKMod_Load$' || { echo "$f does not export NCMKMod_Load"; exit 1; }
+          done
           SYMS $OUT/libncmkmod_debugoverlay.so | grep -qE ' NCMKMod_OnUpdate$'
           SYMS $OUT/libncmkmod_debugoverlay.so | grep -qE ' NCMKMod_OnSceneLoaded$'
           if SYMS $OUT/libncmkloader.so | grep -q ' NCS'; then echo "loader still exports NCS* symbols"; exit 1; fi

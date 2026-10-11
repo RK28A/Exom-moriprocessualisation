@@ -526,8 +526,24 @@ public partial class MainWindow : Window
 
     private PatchOptions Options() => new() { AllowUnverified = AllowUnverified, EmbedMods = EmbedMods };
 
+    /// <summary>Shows which libncmkmod_*.so will be embedded; false when the user cancels.</summary>
+    private bool ConfirmEmbeddedMods(string action)
+    {
+        var options = Options();
+        var mods = _svc.PlannedEmbeddedMods(options);
+        string list;
+        if (!options.EmbedMods) list = "Embedding is turned off (Advanced): no mod will be embedded.";
+        else if (mods.Count == 0) list = "No mod found in Native\\out\\arm64-v8a: only the loader will be embedded." + Environment.NewLine +
+                                         "Add a folder to Mods\\ and click BUILD NATIVE LOADER to build mods.";
+        else list = "Mods embedded into the APK:" + Environment.NewLine +
+                    string.Join(Environment.NewLine, mods.Select(m => $"  \u2022 {m.Name}   ({Path.GetDirectoryName(m.Path)})"));
+        _svc.Log.Info(list);
+        return _ui.Confirm(action, list, "Continue");
+    }
+
     private async void Patch_Click(object sender, RoutedEventArgs e)
     {
+        if (!ConfirmEmbeddedMods("PATCH GAME")) return;
         await RunAsync("Patching", async () =>
         {
             var r = await Task.Run(() => _svc.Patch(Options(), _ui));
@@ -539,6 +555,7 @@ public partial class MainWindow : Window
     private async void PatchInstall_Click(object sender, RoutedEventArgs e)
     {
         var launch = LaunchAfterInstall.IsChecked == true;
+        if (!ConfirmEmbeddedMods("PATCH + INSTALL")) return;
         await RunAsync("Patch + install", async () =>
         {
             var (p, i) = await Task.Run(() => _svc.PatchAndInstall(Options(), _ui, launch));

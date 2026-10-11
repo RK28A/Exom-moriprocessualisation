@@ -2,7 +2,7 @@
   "id": "ncmk.debugoverlay",
   "name": "Debug Overlay",
   "author": "RK",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "requiredApi": 2,
   "library": "libncmkmod_debugoverlay.so"
 }

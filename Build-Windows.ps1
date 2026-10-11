@@ -131,7 +131,7 @@ Get-ChildItem (Join-Path $Root "DeviceMods") -Recurse -File -Force | ForEach-Obj
 foreach ($dir in "Native", "SDK", "Mods") {
     $src = Join-Path $Root $dir
     $dst = Join-Path $Output $dir
-    Get-ChildItem $src -Recurse -File | Where-Object {
+    Get-ChildItem $src -Recurse -File -Force | Where-Object {
         $rel = $_.FullName.Substring($src.Length).TrimStart('\', '/')
         -not ($rel -match '^(build[^\\/]*|out)[\\/]')
     } | ForEach-Object {
@@ -141,10 +141,14 @@ foreach ($dir in "Native", "SDK", "Mods") {
         Copy-Item $_.FullName $target -Force
     }
 }
-# Every source file must be in the Release folder, or "Build Native Loader" fails there.
+# Every mod folder and every source file must be in the Release folder, or "Build Native Loader"
+# cannot build them there.
+Get-ChildItem (Join-Path $Root "Mods") -Directory | ForEach-Object {
+    if (-not (Test-Path (Join-Path (Join-Path $Output "Mods") $_.Name) -PathType Container)) { throw "Release is missing Mods\$($_.Name)" }
+}
 foreach ($dir in "Native", "SDK", "Mods") {
     $src = Join-Path $Root $dir
-    Get-ChildItem $src -Recurse -File -Include *.cpp, *.c, *.h, *.hpp, CMakeLists.txt | ForEach-Object {
+    Get-ChildItem $src -Recurse -File -Force -Include *.cpp, *.c, *.h, *.hpp, CMakeLists.txt, mod.json, .disabled | ForEach-Object {
         $rel = $_.FullName.Substring($src.Length).TrimStart('\', '/')
         if ($rel -match '^(build[^\\/]*|out)[\\/]') { return }
         if (-not (Test-Path (Join-Path (Join-Path $Output $dir) $rel))) { throw "Release is missing $dir\$rel" }

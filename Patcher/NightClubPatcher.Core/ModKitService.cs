@@ -439,6 +439,9 @@ public sealed class ModKitService
     // ------------------------------------------------------------------ patch / install
 
     /// <summary>PATCH GAME. With a UI, the device choice is shown first.</summary>
+    /// <summary>Mods the next patch will embed (shown to the user before patching).</summary>
+    public IReadOnlyList<(string Name, string Path)> PlannedEmbeddedMods(PatchOptions options) => Patcher.PlannedMods(options);
+
     public PatchResult Patch(PatchOptions options, IUserInteraction? ui = null)
     {
         if (ui != null && !SelectDevice(ui, DevicePurpose.PatchOnly))

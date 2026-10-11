@@ -28,21 +28,29 @@ public sealed class NativeBuilder
     public string OutputDir => _paths.NativeOut;
     public string OutputLoader => Path.Combine(OutputDir, GameConstants.LoaderLibName);
 
-    public bool SourcesPresent =>
-        File.Exists(Path.Combine(NativeDir, "CMakeLists.txt")) &&
-        File.Exists(Path.Combine(_paths.Root, "SDK", "Core", "ncmk_mod_api.h"));
+    public bool SourcesPresent => MissingSourcesMessage() == null;
 
-    /// <summary>Mods/&lt;Name&gt;/ folders with C/C++ sources (each one becomes libncmkmod_&lt;name&gt;.so).</summary>
-    public List<string> ModSourceDirs()
+    /// <summary>
+    /// Native/ only builds with SDK/ and Mods/ next to it. Returns a readable message naming the
+    /// missing folder (e.g. "Release\Mods is missing, re-run Build-Windows.ps1"), or null.
+    /// </summary>
+    public string? MissingSourcesMessage()
     {
-        var root = Path.Combine(_paths.Root, "Mods");
-        if (!Directory.Exists(root)) return new List<string>();
-        return Directory.EnumerateDirectories(root)
-            .Where(d => Directory.EnumerateFiles(d, "*.*", SearchOption.AllDirectories)
-                .Any(f => f.EndsWith(".cpp", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".c", StringComparison.OrdinalIgnoreCase)))
-            .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var kit = Path.GetFileName(_paths.Root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        var checks = new (string label, bool ok)[]
+        {
+            ("Native", File.Exists(Path.Combine(NativeDir, "CMakeLists.txt"))),
+            ("SDK", File.Exists(Path.Combine(_paths.Root, "SDK", "Core", "ncmk_mod_api.h"))),
+            ("Mods", Directory.Exists(Path.Combine(_paths.Root, "Mods"))),
+        };
+        var missing = checks.Where(c => !c.ok).Select(c => $"{kit}\\{c.label}").ToList();
+        if (missing.Count == 0) return null;
+        return $"{string.Join(" and ", missing)} {(missing.Count == 1 ? "is" : "are")} missing, re-run Build-Windows.ps1 " +
+               $"(it copies Native\\, SDK\\ and Mods\\ next to NightClubPatcher.exe). Kit folder: {_paths.Root}";
     }
+
+    /// <summary>Mods/&lt;Name&gt;/ folders with a mod.json, as the native build will see them.</summary>
+    public List<Mods.ModFolder> DiscoverMods() => Mods.ModCatalog.Discover(Path.Combine(_paths.Root, "Mods"));
 
     /// <summary>Loader built and valid (AArch64 ELF).</summary>
     public bool LoaderReady(out string? path)
@@ -56,14 +64,14 @@ public sealed class NativeBuilder
     public NativeBuildResult Build(CancellationToken ct = default)
     {
         _log.Step("Checking native build tools");
-        if (!SourcesPresent)
-            return new NativeBuildResult(false, $"Native sources not found in {NativeDir} (CMakeLists.txt and SDK/ are required).", null, Array.Empty<string>());
+        if (MissingSourcesMessage() is { } missing)
+            return new NativeBuildResult(false, missing, null, Array.Empty<string>());
 
-        var mods = ModSourceDirs();
-        if (mods.Count == 0)
-            _log.Warn($"No mod sources in {Path.Combine(_paths.Root, "Mods")} - building the loader only (sample mods skipped).");
-        else
-            _log.Info("Mods to build: " + string.Join(", ", mods.Select(Path.GetFileName)));
+        var mods = DiscoverMods();
+        foreach (var m in mods) _log.Info("  " + m.Describe());
+        if (mods.Count(m => m.WillBuild) == 0) _log.Warn("No mod to build in Mods/ - building the loader only.");
+        if (mods.FirstOrDefault(m => m.Error != null) is { } bad)
+            return new NativeBuildResult(false, $"Mods/{bad.Name}: {bad.Error}", null, Array.Empty<string>());
 
         var ndk = _tools.FindNdk();
         var cmake = _tools.FindCMake();
