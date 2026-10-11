@@ -39,6 +39,8 @@ internal static class Program
           --import-backup <apk>        Use a local original APK as the backup
           --elf-needed <so>            List DT_NEEDED of a shared library
           --elf-add-needed <in.so> <lib> <out.so>   Developer: add a DT_NEEDED entry
+          --dump [folder]              Dump the running game's IL2CPP metadata (classes, fields + offsets,
+                                       methods + RVA/offset/VA) to a .cs file (default: Downloads)
           --tools                      Show located external tools
           --check-tools                Setup status: ADB, Build Tools, JDK 17, Android NDK, CMake, Ninja, Native Loader
           --install-tools              Install / repair every missing tool into Tools/ (portable, PATH untouched)
@@ -276,6 +278,14 @@ internal static class Program
                 Console.WriteLine("Press Ctrl+C to stop.");
                 p.WaitForExit();
                 return 0;
+            }
+
+            case "--dump":
+            {
+                // The game must be running (patched with this NCMK version) on the connected headset.
+                var r = svc.DumpGameAsync(Value(args, cmd)).GetAwaiter().GetResult();
+                Report(svc, r.Ok, r.Message);
+                return r.Ok ? 0 : 2;
             }
 
             case "--push-mods":

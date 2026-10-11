@@ -71,10 +71,18 @@ typedef uint16_t Il2CppChar;
     X(const PropertyInfo*, il2cpp_class_get_properties, (Il2CppClass*, void**))                       \
     X(const char*, il2cpp_property_get_name, (const PropertyInfo*))                                   \
     X(const MethodInfo*, il2cpp_property_get_get_method, (const PropertyInfo*))                       \
+    X(const MethodInfo*, il2cpp_property_get_set_method, (const PropertyInfo*))                       \
     X(const Il2CppType*, il2cpp_method_get_return_type, (const MethodInfo*))                          \
     X(Il2CppClass*, il2cpp_class_from_type, (const Il2CppType*))                                      \
     X(bool, il2cpp_class_is_valuetype, (const Il2CppClass*))                                          \
-    X(Il2CppClass*, il2cpp_object_get_class, (Il2CppObject*))
+    X(Il2CppClass*, il2cpp_object_get_class, (Il2CppObject*))                                         \
+    X(size_t, il2cpp_field_get_offset, (FieldInfo*))                                                  \
+    X(int, il2cpp_class_get_flags, (const Il2CppClass*))                                              \
+    X(bool, il2cpp_class_is_enum, (const Il2CppClass*))                                               \
+    X(bool, il2cpp_class_is_interface, (const Il2CppClass*))                                          \
+    X(Il2CppClass*, il2cpp_class_get_interfaces, (Il2CppClass*, void**))                              \
+    X(Il2CppClass*, il2cpp_class_get_declaring_type, (Il2CppClass*))                                  \
+    X(const char*, il2cpp_method_get_param_name, (const MethodInfo*, uint32_t))
 
 namespace NCMK {
 namespace IL2CPP {

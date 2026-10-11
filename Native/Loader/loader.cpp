@@ -35,6 +35,7 @@
 #include "../../SDK/Core/ncmk_mod_api.h"
 #include "../Diagnostics/PlatformDiagnostics.h"
 #include "../Diagnostics/il2cpp_inspect.h"
+#include "../Remote/command_server.h"
 #include "../Diagnostics/SceneLoaderDiagnostics.h"
 #include "../Hooks/main_thread.h"
 #include "../Il2Cpp/il2cpp_api.h"
@@ -374,6 +375,9 @@ void* WorkerMain(void*) {
         NCMK_LOGW("[NCMK] UnityEngine.Application not found");
 
     BuildHostApi();
+    // PC commands (IL2CPP dump on request). Read-only; also available in Safe Mode.
+    if (G().config.remoteCommands)
+        ncmk::remote::Start({G().package, ncmk::kLoaderVersion, G().gameVersion, G().unityVersion, [] { return IL::IsReady(); }});
     G().plugins.SetDisabledIds(G().config.disabledMods);
     Stage(7, "Plugin manager initialized");
 
@@ -435,6 +439,7 @@ extern "C" NCMK_EXPORT const NCMKHostApi* NCMK_GetHostApi(void) { return IL::IsR
 extern "C" NCMK_EXPORT void NCMK_Shutdown(void) {
     if (g_stopping.exchange(true)) return;
     ncmk::hooks::Restore();
+    ncmk::remote::Stop();
     ncmk::diag::SceneLoaderRestore();
     ncmk::diag::MetaPlatformRestore();
     for (int i = 0; i < 50 && g_loopRunning.load(); ++i) std::this_thread::sleep_for(20ms);

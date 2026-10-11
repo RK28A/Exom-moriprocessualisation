@@ -47,7 +47,9 @@ add_library(ncmkloader SHARED
   Hooks/main_thread.cpp
   Diagnostics/il2cpp_inspect.cpp
   Diagnostics/SceneLoaderDiagnostics.cpp
-  Diagnostics/PlatformDiagnostics.cpp)
+  Diagnostics/PlatformDiagnostics.cpp
+  Diagnostics/il2cpp_dump.cpp
+  Remote/command_server.cpp)
 target_compile_options(ncmkloader PRIVATE ${NCMK_COMMON_FLAGS})
 # The dispatcher entry sits between Unity and a managed method: a managed exception thrown by the
 # original (IL2CPP raises it as a C++ exception) must be able to unwind through this frame.

@@ -46,6 +46,8 @@
         <Button Content="Install patched-current.apk" Click="InstallCurrent_Click"/>
         <Button Content="Restore previous modded build (patched-previous.apk)" Click="InstallPrevious_Click"/>
         <Button Content="Import original APK from file..." Click="Import_Click"/>
+        <Button Content="Dump game (IL2CPP: classes, fields, offsets, RVA) to Downloads" Click="Dump_Click"
+                ToolTip="The patched game must be running on the headset. The loader builds the dump a few classes at a time and streams it to this PC."/>
         <Button Content="Push mods + config to headset (DeviceMods -> NCMKMods)" Click="PushMods_Click"/>
         <Button Content="Open DeviceMods folder" Click="OpenDeviceMods_Click"/>
         <Button Content="Disable Safe Mode" Click="SafeOff_Click"/>

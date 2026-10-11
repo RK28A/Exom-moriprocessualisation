@@ -252,6 +252,23 @@ public sealed class AdbClient
 
     public void ForceStop(string package) => Shell($"am force-stop {package}");
 
+    /// <summary>"adb forward tcp:0 &lt;remote&gt;": a free local TCP port forwarded to the device; null on failure.</summary>
+    public int? Forward(string remote)
+    {
+        var r = RunTimed(TimeSpan.FromSeconds(20), "forward", "tcp:0", remote);
+        return r.Ok && int.TryParse(r.StdOut.Trim(), out var port) && port > 0 ? port : null;
+    }
+
+    public void RemoveForward(int port) => RunTimed(TimeSpan.FromSeconds(20), "forward", "--remove", $"tcp:{port}");
+
+    /// <summary>Process id of a running package, or null.</summary>
+    public int? Pid(string package)
+    {
+        var r = Shell($"pidof {package}");
+        var first = r.StdOut.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return int.TryParse(first, out var pid) ? pid : null;
+    }
+
     /// <summary>
     /// Runs "adb exec-out &lt;command&gt;" and writes its raw (binary) stdout to a local file,
     /// e.g. a tar stream. Returns false and the error text when the command fails.
