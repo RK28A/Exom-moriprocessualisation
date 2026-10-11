@@ -82,6 +82,7 @@ Legend: ✅ implemented and covered by automated tests · 🟡 implemented, **ne
 | 64 | Meta platform diagnostics (read-only: PlatformSettings app id set/empty, `Core.IsInitialized()`, probe on `MetaAchievements.InitPlatform`); no entitlement or account check bypassed | ✅ host / 🟡 needs on-device verification | `PlatformDiagnostics.cpp` |
 | 65 | Storage / OBB diagnostics from the game process (obb folder, files readable or not, Application.dataPath) + Diagnose lists the device OBB folder and storage permissions | 🟡 needs on-device verification | `PlatformDiagnostics.cpp`, `ModKitService.Diagnose` |
 | 66 | Loader settings embedded in the APK (`assets/NCMK/loader.json`, STORED) so diagnostics toggles work when NCMKMods is not readable; `config.json` overrides; CLI `--scene-loader-diagnostics/--scene-loader-recovery on\|off`, Advanced checkboxes | ✅ unit + zip read test / 🟡 needs on-device verification | `PatchOptions.LoaderConfigJson`, `LoadEmbeddedConfig` |
+| 67 | OBB (game content) saved before the signature-change uninstall and put back after (size + MD5), saved by Backup Original, restored when missing; `pm grant READ_EXTERNAL_STORAGE` best effort. Fixes the game stuck in `Loading` (OBB deleted, Resources missing) | ✅ fake adb / 🟡 needs on-device verification | `ObbService`, `InstallService` |
 
 ## Next steps, in order
 
