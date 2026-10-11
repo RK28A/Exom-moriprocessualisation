@@ -277,10 +277,10 @@ extern "C" NCMK_EXPORT void NCMKMod_Unload(void) {
 }
 ```
 
-Build it like the samples: add
-`ncmk_add_mod(ncmkmod_clickcounter ncmkmod_clickcounter path/to/clickcounter.cpp)` to
-`Native/CMakeLists.txt` (or your own CMake project with `-I <kit root>`), then run
-`Native/build.ps1`.
+Build it like the samples: put the file in `Mods/ClickCounter/` and run **Build Native Loader**
+(or `Native/build.ps1`). Every `Mods/<Name>/` folder with `.cpp`/`.c` files is built automatically
+as `libncmkmod_<name>.so`; a missing or empty `Mods/` folder only skips the mods, the loader is
+always built.
 
 ## Building and shipping
 

@@ -1,6 +1,9 @@
 using NightClubPatcher.Core;
 using NightClubPatcher.Core.Diagnostics;
+using NightClubPatcher.Core.Infrastructure;
 using NightClubPatcher.Core.Mods;
+using NightClubPatcher.Core.Patching;
+using NightClubPatcher.Core.Signing;
 using Xunit;
 
 namespace NightClubPatcher.Tests;
@@ -67,5 +70,20 @@ public class NcmkTests
         Assert.Single(hits);
         Assert.Contains("FAILED", hits[0]);
         Assert.Matches(LogcatFilter.Relevant(), lines[2]);
+    }
+
+    [Fact]
+    public void Native_build_finds_mod_source_folders_and_tolerates_none()
+    {
+        using var tmp = new TempDir();
+        var paths = new KitPaths(tmp.File("kit"));
+        var builder = new NativeBuilder(paths, new ToolLocator(paths), new KitLog(null));
+        Assert.Empty(builder.ModSourceDirs()); // no Mods/ at all: loader-only build
+
+        Directory.CreateDirectory(Path.Combine(paths.Root, "Mods", "HelloWorld"));
+        File.WriteAllText(Path.Combine(paths.Root, "Mods", "HelloWorld", "mod.json"), "{}"); // sources missing
+        Directory.CreateDirectory(Path.Combine(paths.Root, "Mods", "DebugOverlay"));
+        File.WriteAllText(Path.Combine(paths.Root, "Mods", "DebugOverlay", "debug_overlay.cpp"), "");
+        Assert.Equal(new[] { "DebugOverlay" }, builder.ModSourceDirs().Select(Path.GetFileName));
     }
 }
