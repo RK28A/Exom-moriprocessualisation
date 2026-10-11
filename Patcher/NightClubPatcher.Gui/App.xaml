@@ -319,8 +319,7 @@
                                 Content="{TemplateBinding SelectionBoxItem}"
                                 ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                                 ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
-                                ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
-                                TextBlock.TextTrimming="CharacterEllipsis"/>
+                                ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"/>
               <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade"
                      IsOpen="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}">
                 <Border x:Name="DropDown" Background="{StaticResource Panel}" BorderBrush="#4A3F66" BorderThickness="1"
